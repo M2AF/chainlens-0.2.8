@@ -1,21 +1,20 @@
-require('dotenv').config(); // Securely load keys from .env
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
-const path = require('path'); // ADDED: Required to handle file directories
+const path = require('path'); // Added for static file routing
 
 const app = express();
-// UPDATED: Now uses Render's dynamic port or defaults to 10000
+// Uses Render's dynamic port or defaults to 10000
 const PORT = process.env.PORT || 10000; 
 
 app.use(cors());
 app.use(express.json());
 
-// --- ADDED: SERVE STATIC FRONTEND ---
-// This tells Express to serve your index.html from a 'public' folder
+// --- SERVE FRONTEND ---
+// This serves all files (HTML, CSS, Images) from the 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
 
-// API keys pulled from your .env file
 const API_KEYS = {
   alchemy: process.env.ALCHEMY_KEY,
   blockfrost: process.env.BLOCKFROST_KEY,
@@ -39,17 +38,25 @@ const fetchAlchemy = async (network, address, chainId) => {
 };
 
 // --- API ROUTES ---
+
+// EVM Routes
 app.get('/api/nfts/ethereum/:address', (req, res) => fetchAlchemy('eth-mainnet', req.params.address, 'ethereum').then(n => res.json({ nfts: n })));
 app.get('/api/nfts/abstract/:address', (req, res) => fetchAlchemy('abstract-mainnet', req.params.address, 'abstract').then(n => res.json({ nfts: n })));
 app.get('/api/nfts/monad/:address', (req, res) => fetchAlchemy('monad-testnet', req.params.address, 'monad').then(n => res.json({ nfts: n })));
 
+// Solana Route
 app.get('/api/nfts/solana/:address', async (req, res) => {
   try {
     const url = `https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 'my-id', method: 'getAssetsByOwner', params: { ownerAddress: req.params.address, page: 1, limit: 100, displayOptions: { showCollectionMetadata: true } } })
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'my-id',
+        method: 'getAssetsByOwner',
+        params: { ownerAddress: req.params.address, page: 1, limit: 100, displayOptions: { showCollectionMetadata: true } }
+      })
     });
     const data = await response.json();
     const items = data.result?.items || [];
@@ -65,14 +72,17 @@ app.get('/api/nfts/solana/:address', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Cardano Route
 app.get('/api/nfts/cardano/:address', async (req, res) => {
   try {
     const stakeRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${req.params.address}`, { headers: { project_id: API_KEYS.blockfrost } });
     const stakeData = await stakeRes.json();
     const stakeAddress = stakeData.stake_address;
     if (!stakeAddress) return res.json({ nfts: [] });
+
     const assetsRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/accounts/${stakeAddress}/addresses/assets`, { headers: { project_id: API_KEYS.blockfrost } });
     const assets = await assetsRes.json();
+
     const nftTasks = assets.filter(a => parseInt(a.quantity) === 1).slice(0, 50).map(async (asset) => {
       try {
         const metaRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/assets/${asset.unit}`, { headers: { project_id: API_KEYS.blockfrost } });
@@ -96,13 +106,14 @@ app.get('/api/nfts/cardano/:address', async (req, res) => {
         };
       } catch (err) { return null; }
     });
+
     const results = await Promise.all(nftTasks);
     res.json({ nfts: results.filter(n => n !== null) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- ADDED: CATCH-ALL ROUTE ---
-// If no API route matches, send the HTML file so the site loads
+// --- CATCH-ALL ROUTE ---
+// Important: This must be the LAST route. It sends the user to the frontend for any non-API URL.
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
