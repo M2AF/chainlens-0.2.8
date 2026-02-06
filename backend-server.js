@@ -5,16 +5,12 @@ const fetch = require('node-fetch');
 const path = require('path');
 
 const app = express();
-// Uses the port from .env or defaults to 10000
 const PORT = process.env.PORT || 10000; 
 
 app.use(cors());
 app.use(express.json());
-
-// Serve static files from the 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Centralized API Keys pulled from your .env
 const API_KEYS = {
   alchemy: process.env.ALCHEMY_KEY,
   blockfrost: process.env.BLOCKFROST_KEY,
@@ -22,8 +18,7 @@ const API_KEYS = {
   unstoppable: process.env.UNSTOPPABLE_KEY
 };
 
-// --- Unstoppable Domains Resolution Endpoint ---
-// Resolves human-readable domains (like brad.crypto) to a wallet address
+// --- Unstoppable Domains Resolution ---
 app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
   const { domain } = req.params;
   try {
@@ -34,27 +29,19 @@ app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
       }
     });
     
-    if (!response.ok) {
-      return res.status(404).json({ error: 'Domain not found or could not be resolved.' });
-    }
+    if (!response.ok) return res.status(404).json({ error: 'Domain not found.' });
     
     const data = await response.json();
-    
-    // Prioritize the Ethereum address for EVM chain compatibility
     const address = data.records?.['crypto.ETH.address'] || data.meta?.owner;
     
-    if (address) {
-      res.json({ address });
-    } else {
-      res.status(404).json({ error: 'No EVM address linked to this domain.' });
-    }
+    if (address) res.json({ address });
+    else res.status(404).json({ error: 'No EVM address linked.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- EVM Helper (Ethereum, Abstract, Monad) ---
-// Fetches NFT metadata via Alchemy
+// --- Alchemy EVM Helper ---
 const fetchAlchemy = async (network, address, chainId) => {
   try {
     const res = await fetch(`https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`);
@@ -75,12 +62,14 @@ app.get('/api/nfts/ethereum/:address', (req, res) => fetchAlchemy('eth-mainnet',
 app.get('/api/nfts/abstract/:address', (req, res) => fetchAlchemy('abstract-mainnet', req.params.address, 'abstract').then(n => res.json({ nfts: n })));
 app.get('/api/nfts/monad/:address', (req, res) => fetchAlchemy('monad-testnet', req.params.address, 'monad').then(n => res.json({ nfts: n })));
 
+// ADDED: Base and Polygon Support
+app.get('/api/nfts/base/:address', (req, res) => fetchAlchemy('base-mainnet', req.params.address, 'base').then(n => res.json({ nfts: n })));
+app.get('/api/nfts/polygon/:address', (req, res) => fetchAlchemy('polygon-mainnet', req.params.address, 'polygon').then(n => res.json({ nfts: n })));
+
 // --- SOLANA ROUTE ---
-// Fetches assets using Helius RPC
 app.get('/api/nfts/solana/:address', async (req, res) => {
   try {
-    const url = `https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`;
-    const response = await fetch(url, {
+    const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -104,49 +93,35 @@ app.get('/api/nfts/solana/:address', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- CARDANO ROUTE + HANDLE INTEGRATION ---
-// Resolves $handles and fetches assets via Blockfrost
+// --- CARDANO ROUTE ---
 app.get('/api/nfts/cardano/:address', async (req, res) => {
   try {
     let targetAddress = req.params.address;
-
-    // Resolve ADA Handle if the input starts with '$'
     if (targetAddress.startsWith('$')) {
       const handleName = targetAddress.replace('$', '').toLowerCase();
-      try {
-        const handleRes = await fetch(`https://api.handle.me/handles/${handleName}`);
-        if (handleRes.ok) {
-          const handleData = await handleRes.json();
-          if (handleData.resolved_addresses?.ada) {
-            targetAddress = handleData.resolved_addresses.ada;
-          }
-        }
-      } catch (e) { console.error("Handle resolution error"); }
+      const handleRes = await fetch(`https://api.handle.me/handles/${handleName}`);
+      if (handleRes.ok) {
+        const handleData = await handleRes.json();
+        if (handleData.resolved_addresses?.ada) targetAddress = handleData.resolved_addresses.ada;
+      }
     }
 
-    // Retrieve Stake Address to find all associated assets
     const stakeRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${targetAddress}`, { headers: { project_id: API_KEYS.blockfrost } });
     const stakeData = await stakeRes.json();
     const stakeAddress = stakeData.stake_address;
     if (!stakeAddress) return res.json({ nfts: [] });
 
-    // Fetch individual asset units
     const assetsRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/accounts/${stakeAddress}/addresses/assets`, { headers: { project_id: API_KEYS.blockfrost } });
     const assets = await assetsRes.json();
 
-    // Map through assets to fetch full metadata
     const nftTasks = assets.filter(a => parseInt(a.quantity) === 1).slice(0, 50).map(async (asset) => {
       try {
         const metaRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/assets/${asset.unit}`, { headers: { project_id: API_KEYS.blockfrost } });
         const meta = await metaRes.json();
         let img = meta.onchain_metadata?.image || '';
         if (Array.isArray(img)) img = img.join('');
-        let imageUrl = '';
-        if (img) {
-          if (img.startsWith('ipfs://')) imageUrl = `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}`;
-          else if (img.startsWith('Qm') || img.startsWith('baf')) imageUrl = `https://ipfs.io/ipfs/${img}`;
-          else imageUrl = img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`;
-        }
+        let imageUrl = img ? (img.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}` : (img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`)) : '';
+        
         return {
           id: asset.unit,
           name: meta.onchain_metadata?.name || meta.asset_name || 'Cardano NFT',
@@ -163,9 +138,5 @@ app.get('/api/nfts/cardano/:address', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Fallback to serve the main frontend file
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

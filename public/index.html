@@ -71,7 +71,8 @@
       const [evmAddr, setEvmAddr] = useState('');
       const [solAddr, setSolAddr] = useState('');
       const [adaAddr, setAdaAddr] = useState('');
-      const [activeChains, setActiveChains] = useState(['ethereum', 'solana', 'cardano', 'abstract', 'monad']);
+      // Updated default active chains
+      const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']);
       const [nfts, setNfts] = useState([]);
       const [loading, setLoading] = useState(false);
       const [darkMode, setDarkMode] = useState(false);
@@ -80,8 +81,11 @@
       const [resolvedEvm, setResolvedEvm] = useState(null);
       const [isResolving, setIsResolving] = useState(false);
 
+      // Updated styles with Base and Polygon
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum' },
+        polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon' },
+        base: { color: 'bg-[#0052FF]', label: 'Base' },
         solana: { color: 'bg-solana-gradient-soft', label: 'Solana' },
         cardano: { color: 'bg-[#0033AD]', label: 'Cardano' },
         monad: { color: 'bg-[#836EF9]', label: 'Monad' },
@@ -126,8 +130,9 @@
         }
 
         const tasks = [];
+        // Updated EVM loop to include new chains
         if (targetEvm.startsWith('0x')) {
-          ['ethereum', 'abstract', 'monad'].forEach(chain => {
+          ['ethereum', 'polygon', 'base', 'abstract', 'monad'].forEach(chain => {
             if (activeChains.includes(chain)) {
               tasks.push(fetch(`/api/nfts/${chain}/${targetEvm}`).then(r => r.json()));
             }
@@ -210,7 +215,14 @@
                     />
                     {isResolving && <div className="absolute right-4 top-4 animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
                   </div>
-                  <div className="flex flex-wrap gap-2"><ChainButton id="ethereum" /><ChainButton id="abstract" /><ChainButton id="monad" /></div>
+                  {/* Added Polygon and Base buttons */}
+                  <div className="flex flex-wrap gap-2">
+                    <ChainButton id="ethereum" />
+                    <ChainButton id="polygon" />
+                    <ChainButton id="base" />
+                    <ChainButton id="abstract" />
+                    <ChainButton id="monad" />
+                  </div>
                 </div>
 
                 <div className="space-y-4">
