@@ -20,7 +20,6 @@
           fontFamily: {
             sans: ['Space Grotesk', 'sans-serif'],
             heading: ['Syne', 'sans-serif'],
-            batangas: ['Batangas', 'sans-serif'],
           }
         }
       }
@@ -28,20 +27,8 @@
   </script>
 
   <style>
-    @font-face {
-      font-family: 'Batangas';
-      src: url('./Batangas.otf') format('opentype');
-      font-weight: normal;
-      font-style: normal;
-      font-display: swap;
-    }
-
     body { font-family: 'Space Grotesk', sans-serif; scroll-behavior: smooth; }
     .font-heading { font-family: 'Syne', sans-serif; }
-    
-    .font-batangas { 
-      font-family: 'Batangas', sans-serif !important; 
-    }
     
     .bg-solana-gradient {
       background: linear-gradient(45deg, #9945FF, #14F195);
@@ -246,11 +233,10 @@
               </div>
               
               <div className="flex flex-col md:flex-row gap-4">
-                {/* Updated Button: Bigger text (text-3xl) and spaced out (tracking-widest) */}
                 <button 
                   onClick={handleSearch} 
                   disabled={loading} 
-                  className={`flex-1 py-7 rounded-2xl font-batangas font-extrabold text-3xl uppercase tracking-widest transition-all active:scale-[0.98] ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
+                  className={`flex-1 py-7 rounded-2xl font-sans font-bold text-4xl uppercase tracking-widest transition-all active:scale-[0.98] ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
                   {loading ? 'ANALYZING LEDGERS...' : 'SCAN ASSETS'}
                 </button>
                 <button onClick={clearAll} className={`px-10 py-7 rounded-2xl font-heading font-bold text-xl tracking-tighter border-2 transition-all active:scale-[0.98] ${darkMode ? 'border-slate-800 text-slate-500 hover:border-red-500 hover:text-red-500' : 'border-slate-200 text-slate-400 hover:border-red-500 hover:text-red-500'}`}>
