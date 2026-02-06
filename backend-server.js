@@ -4,7 +4,8 @@ const cors = require('cors');
 const fetch = require('node-fetch');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+// UPDATED: Now uses Render's dynamic port or defaults to 10000
+const PORT = process.env.PORT || 10000; 
 
 app.use(cors());
 app.use(express.json());
@@ -105,8 +106,8 @@ app.get('/api/nfts/cardano/:address', async (req, res) => {
           image: imageUrl || 'https://via.placeholder.com/400/06b6d4/ffffff?text=Cardano+NFT',
           collection: meta.onchain_metadata?.collection || meta.policy_id?.substring(0, 8) || 'Cardano',
           metadata: { 
-            traits: meta.onchain_metadata?.attributes || [], 
-            description: meta.onchain_metadata?.description || '' 
+            traits: meta.onchain_metadata?.attributes || [],
+            description: meta.onchain_metadata?.description || ''
           }
         };
       } catch (err) { return null; }
