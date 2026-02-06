@@ -106,7 +106,6 @@
         setNfts([]);
         const tasks = [];
 
-        // Using relative paths for seamless Render deployment
         if (evmAddr.trim()) {
           ['ethereum', 'abstract', 'monad'].forEach(chain => {
             if (activeChains.includes(chain)) {
@@ -164,11 +163,13 @@
           </div>
 
           <div className="max-w-6xl mx-auto p-8 pt-16">
-            <div className="flex flex-col items-center mb-24">
-              <img src="/chainlens.png" alt="ChainLens Logo" className="h-56 w-auto object-contain transition-transform duration-700 hover:scale-105 drop-shadow-2xl" />
-              <h1 className="mt-6 text-5xl font-heading font-black tracking-tighter uppercase italic">
-                CHAIN<span className="text-cyan-500">LENS</span>
-              </h1>
+            {/* LOGO ONLY SECTION */}
+            <div className="flex flex-col items-center mb-12">
+              <img 
+                src="/chainlens.png" 
+                alt="ChainLens Logo" 
+                className="h-64 w-auto object-contain transition-transform duration-700 hover:scale-105 drop-shadow-2xl" 
+              />
             </div>
 
             <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-20 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
