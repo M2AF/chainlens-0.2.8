@@ -30,7 +30,6 @@
     body { font-family: 'Space Grotesk', sans-serif; scroll-behavior: smooth; }
     .font-heading { font-family: 'Syne', sans-serif; }
     
-    /* Official Solana Gradient */
     .bg-solana-gradient {
       background: linear-gradient(45deg, #9945FF, #14F195);
     }
@@ -38,7 +37,6 @@
       background: linear-gradient(45deg, rgba(153,69,255,0.85), rgba(20,241,149,0.85));
     }
 
-    /* Modern Switch Toggle */
     .switch-bg {
       width: 54px;
       height: 28px;
@@ -61,15 +59,6 @@
     .dark-scroll::-webkit-scrollbar { width: 8px; }
     .dark-scroll::-webkit-scrollbar-track { background: #0f172a; }
     .dark-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-    
-    /* ADDED: Extra polish for cards */
-    .nft-card-shadow {
-      transition: all 0.3s ease;
-    }
-    .nft-card-shadow:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1);
-    }
   </style>
 </head>
 <body>
@@ -117,7 +106,7 @@
         setNfts([]);
         const tasks = [];
 
-        // UPDATED: All fetch calls now use relative paths like /api/ instead of localhost
+        // Using relative paths for seamless Render deployment
         if (evmAddr.trim()) {
           ['ethereum', 'abstract', 'monad'].forEach(chain => {
             if (activeChains.includes(chain)) {
@@ -175,10 +164,9 @@
           </div>
 
           <div className="max-w-6xl mx-auto p-8 pt-16">
-            {/* UPDATED: Logo centered and styled */}
-            <div className="flex flex-col items-center mb-16">
-              <img src="/chainlens.png" alt="ChainLens Logo" className="h-48 w-auto object-contain transition-transform duration-700 hover:scale-105 drop-shadow-2xl" />
-              <h1 className="mt-4 text-4xl font-heading font-extrabold tracking-tighter uppercase italic">
+            <div className="flex flex-col items-center mb-24">
+              <img src="/chainlens.png" alt="ChainLens Logo" className="h-56 w-auto object-contain transition-transform duration-700 hover:scale-105 drop-shadow-2xl" />
+              <h1 className="mt-6 text-5xl font-heading font-black tracking-tighter uppercase italic">
                 CHAIN<span className="text-cyan-500">LENS</span>
               </h1>
             </div>
@@ -188,6 +176,7 @@
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">EVM Chains</label>
+                    <button onClick={() => setEvmAddr('0x01faF6DFc230d755141D84d7cB980dd68f5Efe13')} className="text-[10px] font-bold text-blue-500 hover:underline">LOAD TEST</button>
                   </div>
                   <input type="text" value={evmAddr} onChange={e => setEvmAddr(e.target.value)} placeholder="0x..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200 focus:border-blue-400'}`} />
                   <div className="flex flex-wrap gap-2"><ChainButton id="ethereum" /><ChainButton id="abstract" /><ChainButton id="monad" /></div>
@@ -196,6 +185,7 @@
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
+                    <button onClick={() => setSolAddr('3noTuHnQdHkat2w5rBx18vAACMzFUvB5LodEe5vMN98d')} className="text-[10px] font-bold text-emerald-500 hover:underline">LOAD TEST</button>
                   </div>
                   <input type="text" value={solAddr} onChange={e => setSolAddr(e.target.value)} placeholder="Address..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-400'}`} />
                   <div className="flex flex-wrap gap-2"><ChainButton id="solana" /></div>
@@ -204,6 +194,7 @@
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
+                    <button onClick={() => setAdaAddr('addr1q950qv0ks9t29mavulaa5jr3sk2s50r5jfsddydjs0pazrfh32tdpt7zttt4mhl6t9purm4c9rv555z7r5mulq78aleqcg9c9h')} className="text-[10px] font-bold text-cyan-500 hover:underline">LOAD TEST</button>
                   </div>
                   <input type="text" value={adaAddr} onChange={e => setAdaAddr(e.target.value)} placeholder="addr1..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-cyan-500' : 'bg-slate-50 border-slate-200 focus:border-cyan-400'}`} />
                   <div className="flex flex-wrap gap-2"><ChainButton id="cardano" /></div>
@@ -222,7 +213,7 @@
 
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8">
               {nfts.map((nft, i) => (
-                <div key={i} onClick={() => setSelectedNft(nft)} className={`group rounded-[2.5rem] overflow-hidden shadow-sm border cursor-pointer transition-all hover:-translate-y-2 nft-card-shadow ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
+                <div key={i} onClick={() => setSelectedNft(nft)} className={`group rounded-[2.5rem] overflow-hidden shadow-sm border cursor-pointer transition-all hover:-translate-y-2 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
                   <div className="aspect-square relative overflow-hidden bg-slate-100">
                     <img src={nft.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                     <div className={`absolute top-4 left-4 px-3 py-1 rounded-full text-[9px] text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
