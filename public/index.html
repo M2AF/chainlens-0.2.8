@@ -20,7 +20,7 @@
           fontFamily: {
             sans: ['Space Grotesk', 'sans-serif'],
             heading: ['Syne', 'sans-serif'],
-            // Registering Batangas for use as a utility class
+            // Tailwind class: font-batangas
             batangas: ['Batangas', 'sans-serif'],
           }
         }
@@ -29,10 +29,11 @@
   </script>
 
   <style>
-    /* Registering your OTF font file from the public folder */
+    /* 1. Direct path to your OTF file */
     @font-face {
       font-family: 'Batangas';
-      src: url('/Batangas.otf') format('opentype');
+      /* Try ./Batangas.otf if /Batangas.otf doesn't load */
+      src: url('./Batangas.otf') format('opentype');
       font-weight: normal;
       font-style: normal;
       font-display: swap;
@@ -40,6 +41,11 @@
 
     body { font-family: 'Space Grotesk', sans-serif; scroll-behavior: smooth; }
     .font-heading { font-family: 'Syne', sans-serif; }
+    
+    /* 2. Extra safety utility to ensure font-batangas works */
+    .font-batangas { 
+      font-family: 'Batangas', sans-serif !important; 
+    }
     
     .bg-solana-gradient {
       background: linear-gradient(45deg, #9945FF, #14F195);
@@ -204,6 +210,7 @@
 
             <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-20 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-10">
+                {/* EVM Section */}
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
@@ -224,6 +231,7 @@
                   <div className="flex flex-wrap gap-2"><ChainButton id="ethereum" /><ChainButton id="abstract" /><ChainButton id="monad" /></div>
                 </div>
 
+                {/* Solana Section */}
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
@@ -233,6 +241,7 @@
                   <div className="flex flex-wrap gap-2"><ChainButton id="solana" /></div>
                 </div>
 
+                {/* Cardano Section */}
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
@@ -244,8 +253,11 @@
               </div>
               
               <div className="flex flex-col md:flex-row gap-4">
-                {/* Applied 'font-batangas' only to this button */}
-                <button onClick={handleSearch} disabled={loading} className={`flex-1 py-7 rounded-2xl font-batangas font-extrabold text-2xl tracking-tighter transition-all active:scale-[0.98] ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
+                {/* 3. Button using the Batangas font */}
+                <button 
+                  onClick={handleSearch} 
+                  disabled={loading} 
+                  className={`flex-1 py-7 rounded-2xl font-batangas font-extrabold text-2xl tracking-tighter transition-all active:scale-[0.98] ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
                   {loading ? 'ANALYZING LEDGERS...' : 'SCAN ASSETS'}
                 </button>
                 <button onClick={clearAll} className={`px-10 py-7 rounded-2xl font-heading font-bold text-xl tracking-tighter border-2 transition-all active:scale-[0.98] ${darkMode ? 'border-slate-800 text-slate-500 hover:border-red-500 hover:text-red-500' : 'border-slate-200 text-slate-400 hover:border-red-500 hover:text-red-500'}`}>
@@ -254,6 +266,7 @@
               </div>
             </div>
 
+            {/* Results Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8">
               {nfts.map((nft, i) => (
                 <div key={i} onClick={() => setSelectedNft(nft)} className={`group rounded-[2.5rem] overflow-hidden shadow-sm border cursor-pointer transition-all hover:-translate-y-2 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
@@ -270,6 +283,7 @@
               ))}
             </div>
 
+            {/* Modal */}
             {selectedNft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
                 <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-12 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100'}`}>
