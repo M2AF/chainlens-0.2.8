@@ -30,219 +30,198 @@
     body { font-family: 'Space Grotesk', sans-serif; scroll-behavior: smooth; }
     .font-heading { font-family: 'Syne', sans-serif; }
     
-    .bg-solana-gradient {
-      background: linear-gradient(45deg, #9945FF, #14F195);
-    }
-    .bg-solana-gradient-soft {
-      background: linear-gradient(45deg, rgba(153,69,255,0.85), rgba(20,241,149,0.85));
+    .bg-mesh {
+      background-color: #020617;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(30, 58, 138, 0.3) 0, transparent 50%), 
+        radial-gradient(at 100% 0%, rgba(88, 28, 135, 0.3) 0, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(15, 23, 42, 0.5) 0, transparent 50%);
     }
 
-    .switch-bg {
-      width: 54px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      padding: 4px;
-      cursor: pointer;
-      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    .nft-card {
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
-    .switch-dot {
-      width: 20px;
-      height: 20px;
-      transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    .nft-card:hover {
+      transform: translateY(-8px) scale(1.02);
     }
-    .translate-x-6 { transform: translateX(26px); }
+    
+    .glass {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
 
-    .modal-enter { animation: fadeIn 0.3s ease-out; }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-    .dark-scroll::-webkit-scrollbar { width: 8px; }
-    .dark-scroll::-webkit-scrollbar-track { background: #0f172a; }
-    .dark-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    .shimmer {
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+      background-size: 200% 100%;
+      animation: shimmer 2s infinite;
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
   </style>
 </head>
-<body>
+<body class="bg-mesh text-slate-200 min-h-screen">
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect } = React;
 
     const App = () => {
-      const [evmAddr, setEvmAddr] = useState('');
-      const [solAddr, setSolAddr] = useState('');
-      const [adaAddr, setAdaAddr] = useState('');
-      const [activeChains, setActiveChains] = useState(['ethereum', 'solana', 'cardano', 'abstract', 'monad']);
+      const [address, setAddress] = useState('');
       const [nfts, setNfts] = useState([]);
       const [loading, setLoading] = useState(false);
-      const [darkMode, setDarkMode] = useState(false);
+      const [selectedChain, setSelectedChain] = useState('ethereum');
       const [selectedNft, setSelectedNft] = useState(null);
+      const [darkMode, setDarkMode] = useState(true);
 
-      const chainStyles = {
-        ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum' },
-        solana: { color: 'bg-solana-gradient-soft', label: 'Solana' },
-        cardano: { color: 'bg-[#0033AD]', label: 'Cardano' },
-        monad: { color: 'bg-[#836EF9]', label: 'Monad' },
-        abstract: { color: 'bg-[#00FF85] text-black', label: 'Abstract' }
-      };
+      const chains = [
+        { id: 'ethereum', name: 'Ethereum', color: 'from-blue-600 to-indigo-600', icon: 'https://cryptologos.cc/logos/ethereum-eth-logo.png' },
+        { id: 'abstract', name: 'Abstract', color: 'from-green-500 to-emerald-600', icon: 'https://pbs.twimg.com/profile_images/1806351066060017664/D-r89F1i_400x400.jpg' },
+        { id: 'monad', name: 'Monad', color: 'from-purple-600 to-fuchsia-600', icon: 'https://pbs.twimg.com/profile_images/1765806657937817600/R946B5U4_400x400.jpg' },
+        { id: 'solana', name: 'Solana', color: 'from-teal-400 to-cyan-500', icon: 'https://cryptologos.cc/logos/solana-sol-logo.png' },
+        { id: 'cardano', name: 'Cardano', color: 'from-blue-700 to-blue-900', icon: 'https://cryptologos.cc/logos/cardano-ada-logo.png' }
+      ];
 
-      useEffect(() => {
-        const savedMode = localStorage.getItem('darkMode');
-        if (savedMode === 'true') setDarkMode(true);
-      }, []);
-
-      useEffect(() => {
-        localStorage.setItem('darkMode', darkMode);
-      }, [darkMode]);
-
-      const clearAll = () => {
-        setEvmAddr('');
-        setSolAddr('');
-        setAdaAddr('');
-        setNfts([]);
-      };
-
-      const handleSearch = async () => {
+      const fetchNfts = async () => {
+        if (!address) return;
         setLoading(true);
-        setNfts([]);
-        const tasks = [];
-
-        if (evmAddr.trim()) {
-          ['ethereum', 'abstract', 'monad'].forEach(chain => {
-            if (activeChains.includes(chain)) {
-              tasks.push(fetch(`/api/nfts/${chain}/${evmAddr.trim()}`).then(r => r.json()));
-            }
-          });
-        }
-        if (solAddr.trim() && activeChains.includes('solana')) {
-          tasks.push(fetch(`/api/nfts/solana/${solAddr.trim()}`).then(r => r.json()));
-        }
-        if (adaAddr.trim() && activeChains.includes('cardano')) {
-          tasks.push(fetch(`/api/nfts/cardano/${adaAddr.trim()}`).then(r => r.json()));
-        }
-
         try {
-          const results = await Promise.allSettled(tasks);
-          const combined = results
-            .filter(r => r.status === 'fulfilled' && r.value.nfts)
-            .flatMap(r => r.value.nfts);
-          
-          const spamWords = ['voucher', 'wen', 'airdrop', 'promo', 'lucky', 'ticket', 'pass', 'jup', 'jupiter', 'unprotected', 'box', 'redeem', 'claim', 'gift'];
-          const filtered = combined.filter(nft => {
-            const rawName = (nft.name || '').toLowerCase();
-            const name = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "");
-            return !spamWords.some(word => name.includes(word));
-          });
-          setNfts(filtered);
-        } catch (e) { console.error("Search error:", e); }
-        setLoading(false);
-      };
-
-      const ChainButton = ({ id }) => {
-        const style = chainStyles[id];
-        const isActive = activeChains.includes(id);
-        const activeBgClass = id === 'solana' ? 'bg-solana-gradient' : style.color;
-        
-        return (
-          <button onClick={() => setActiveChains(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} 
-            className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all border-2 
-            ${isActive ? `${activeBgClass} text-white border-transparent shadow-lg scale-105` 
-            : darkMode ? 'bg-slate-800 text-slate-500 border-slate-700' : 'bg-white text-slate-300 border-slate-100'}`}>
-            {style.label}
-          </button>
-        );
+          const res = await fetch(`http://localhost:10000/api/nfts/${selectedChain}/${address}`);
+          const data = await res.json();
+          setNfts(data.nfts || []);
+        } catch (err) {
+          console.error(err);
+          setNfts([]);
+        } finally {
+          setLoading(false);
+        }
       };
 
       return (
-        <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
-          
-          <div className="fixed top-8 right-8 z-50 flex items-center space-x-3 bg-white/10 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-xl">
-            <span className="pl-2 text-[9px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-            <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-              <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
-            </div>
-          </div>
-
-          <div className="max-w-6xl mx-auto p-8 pt-16">
-            {/* LOGO ONLY SECTION */}
-            <div className="flex flex-col items-center mb-12">
-              <img 
-                src={darkMode ? "/ChainLens (dark).png" : "/ChainLens (light).png"} 
-                alt="ChainLens Logo" 
-                className="h-64 w-auto object-contain transition-transform duration-700 hover:scale-105" 
-              />
-            </div>
-
-            <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-20 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-10">
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">EVM Chains</label>
-                    <button onClick={() => setEvmAddr('0x01faF6DFc230d755141D84d7cB980dd68f5Efe13')} className="text-[10px] font-bold text-blue-500 hover:underline">LOAD TEST</button>
-                  </div>
-                  <input type="text" value={evmAddr} onChange={e => setEvmAddr(e.target.value)} placeholder="0x..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200 focus:border-blue-400'}`} />
-                  <div className="flex flex-wrap gap-2"><ChainButton id="ethereum" /><ChainButton id="abstract" /><ChainButton id="monad" /></div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
-                    <button onClick={() => setSolAddr('3noTuHnQdHkat2w5rBx18vAACMzFUvB5LodEe5vMN98d')} className="text-[10px] font-bold text-emerald-500 hover:underline">LOAD TEST</button>
-                  </div>
-                  <input type="text" value={solAddr} onChange={e => setSolAddr(e.target.value)} placeholder="Address..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-400'}`} />
-                  <div className="flex flex-wrap gap-2"><ChainButton id="solana" /></div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
-                    <button onClick={() => setAdaAddr('addr1q950qv0ks9t29mavulaa5jr3sk2s50r5jfsddydjs0pazrfh32tdpt7zttt4mhl6t9purm4c9rv555z7r5mulq78aleqcg9c9h')} className="text-[10px] font-bold text-cyan-500 hover:underline">LOAD TEST</button>
-                  </div>
-                  <input type="text" value={adaAddr} onChange={e => setAdaAddr(e.target.value)} placeholder="addr1..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-cyan-500' : 'bg-slate-50 border-slate-200 focus:border-cyan-400'}`} />
-                  <div className="flex flex-wrap gap-2"><ChainButton id="cardano" /></div>
-                </div>
+        <div className={`transition-colors duration-500 ${darkMode ? 'dark text-slate-200' : 'bg-slate-50 text-slate-900'}`}>
+          <div className="max-w-7xl mx-auto px-6 py-12">
+            
+            {/* Header */}
+            <header className="flex flex-col md:flex-row justify-between items-center mb-16 gap-8">
+              <div>
+                <h1 className="text-5xl font-heading font-extrabold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-500">
+                  CHAINLENS
+                </h1>
+                <p className="text-slate-500 font-medium tracking-wide mt-2">MULTI-CHAIN ASSET EXPLORER</p>
               </div>
               
-              <div className="flex flex-col md:flex-row gap-4">
-                <button onClick={handleSearch} disabled={loading} className={`flex-1 py-7 rounded-2xl font-heading font-extrabold text-2xl tracking-tighter transition-all active:scale-[0.98] ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
-                  {loading ? 'ANALYZING LEDGERS...' : 'SCAN ASSETS'}
-                </button>
-                <button onClick={clearAll} className={`px-10 py-7 rounded-2xl font-heading font-bold text-xl tracking-tighter border-2 transition-all active:scale-[0.98] ${darkMode ? 'border-slate-800 text-slate-500 hover:border-red-500 hover:text-red-500' : 'border-slate-200 text-slate-400 hover:border-red-500 hover:text-red-500'}`}>
-                  CLEAR
+              <div className="flex bg-slate-900/50 p-1.5 rounded-2xl glass border border-slate-800">
+                {chains.map(chain => (
+                  <button
+                    key={chain.id}
+                    onClick={() => setSelectedChain(chain.id)}
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl transition-all duration-300 font-bold text-sm ${
+                      selectedChain === chain.id 
+                      ? 'bg-white text-slate-950 shadow-xl' 
+                      : 'hover:bg-white/5 text-slate-400'
+                    }`}
+                  >
+                    <img src={chain.icon} className="w-4 h-4 rounded-full" />
+                    <span className="hidden sm:inline">{chain.name}</span>
+                  </button>
+                ))}
+              </div>
+            </header>
+
+            {/* Search Bar */}
+            <div className="relative max-w-3xl mx-auto mb-20 group">
+              <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-[2rem] blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
+              <div className="relative flex items-center bg-slate-900/80 rounded-[2rem] glass p-2 border border-white/10">
+                <input 
+                  type="text"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder={selectedChain === 'cardano' ? "Enter $handle or addr1..." : "Enter wallet address..."}
+                  className="w-full bg-transparent px-8 py-4 outline-none text-lg font-medium placeholder:text-slate-600"
+                />
+                <button 
+                  onClick={fetchNfts}
+                  disabled={loading}
+                  className="bg-white text-slate-950 px-10 py-4 rounded-2xl font-bold hover:scale-105 active:scale-95 transition-all shadow-lg shadow-white/10 disabled:opacity-50"
+                >
+                  {loading ? 'SCANNING...' : 'SCAN'}
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8">
-              {nfts.map((nft, i) => (
-                <div key={i} onClick={() => setSelectedNft(nft)} className={`group rounded-[2.5rem] overflow-hidden shadow-sm border cursor-pointer transition-all hover:-translate-y-2 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-                  <div className="aspect-square relative overflow-hidden bg-slate-100">
-                    <img src={nft.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-                    <div className={`absolute top-4 left-4 px-3 py-1 rounded-full text-[9px] text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
-                      {nft.chain}
+            {/* Content Area */}
+            {loading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                {[1,2,3,4,5,6,7,8].map(i => (
+                  <div key={i} className="h-80 rounded-[2rem] glass shimmer border border-white/5"></div>
+                ))}
+              </div>
+            ) : nfts.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                {nfts.map((nft) => (
+                  <div 
+                    key={nft.id}
+                    onClick={() => setSelectedNft(nft)}
+                    className="nft-card cursor-pointer group"
+                  >
+                    <div className="relative rounded-[2.5rem] overflow-hidden glass border border-white/10 bg-slate-900 shadow-2xl">
+                      <div className="aspect-square overflow-hidden">
+                        <img 
+                          src={nft.image} 
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
+                          onError={(e) => e.target.src = 'https://via.placeholder.com/400/0f172a/ffffff?text=Image+Unavailable'}
+                        />
+                      </div>
+                      <div className="p-6">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{nft.collection}</p>
+                        <h3 className="text-lg font-bold truncate tracking-tight">{nft.name}</h3>
+                      </div>
                     </div>
                   </div>
-                  <div className="p-5 text-center">
-                    <p className={`font-heading font-bold truncate text-sm uppercase tracking-tight ${darkMode ? 'text-white' : 'text-slate-900'}`}>{nft.name}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : address && !loading && (
+              <div className="text-center py-20 bg-slate-900/30 rounded-[3rem] border border-dashed border-white/5 glass">
+                <p className="text-slate-500 font-medium">No assets found for this address on {selectedChain}.</p>
+              </div>
+            )}
 
+            {/* Detail Modal */}
             {selectedNft && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
-                <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-12 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100'}`}>
-                  <button onClick={() => setSelectedNft(null)} className="absolute top-10 right-10 w-12 h-12 flex items-center justify-center rounded-full bg-slate-800 hover:bg-red-500 text-white transition-all font-bold">✕</button>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                    <div className="rounded-[2.5rem] overflow-hidden shadow-2xl bg-black/5 aspect-square relative">
-                       <img src={selectedNft.image} className="w-full h-full object-contain" />
-                       <div className={`absolute top-6 left-6 px-4 py-1.5 rounded-full text-white text-[10px] font-bold uppercase tracking-widest backdrop-blur-md border border-white/20 shadow-lg ${chainStyles[selectedNft.chain]?.color}`}>
+              <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+                <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" onClick={() => setSelectedNft(null)}></div>
+                <div className="relative w-full max-w-5xl glass rounded-[3rem] border border-white/10 overflow-hidden shadow-2xl flex flex-col md:flex-row">
+                  <div className="w-full md:w-1/2 aspect-square">
+                    <img src={selectedNft.image} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="w-full md:w-1/2 p-10 flex flex-col max-h-[90vh] overflow-y-auto">
+                    <div className="flex justify-between items-start mb-8">
+                      <div>
+                        <span className="px-4 py-1.5 rounded-full bg-white/10 text-[10px] font-bold uppercase tracking-widest border border-white/10 mb-4 inline-block">
                           {selectedNft.chain}
-                        </div>
+                        </span>
+                        <h2 className="text-4xl font-heading font-extrabold tracking-tighter">{selectedNft.name}</h2>
+                      </div>
+                      <button onClick={() => setSelectedNft(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
                     </div>
+
                     <div className="space-y-8">
                       <div>
-                        <h2 className="text-4xl font-heading font-extrabold uppercase tracking-tighter leading-none">{selectedNft.name}</h2>
+                        <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest block mb-3">Collection</label>
+                        <p className="text-xl font-bold">{selectedNft.collection || 'Unknown'}</p>
                       </div>
+
+                      {selectedNft.metadata?.description && (
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest block mb-3">Description</label>
+                          <p className="text-slate-400 leading-relaxed text-sm">{selectedNft.metadata.description}</p>
+                        </div>
+                      )}
+
                       <div className="space-y-4">
                         <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">On-Chain Metadata</label>
                         <div className="grid grid-cols-2 gap-3">

@@ -2,17 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
-const path = require('path'); // Added for static file routing
+const path = require('path');
 
 const app = express();
-// Uses Render's dynamic port or defaults to 10000
 const PORT = process.env.PORT || 10000; 
 
 app.use(cors());
 app.use(express.json());
-
-// --- SERVE FRONTEND ---
-// This serves all files (HTML, CSS, Images) from the 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
 
 const API_KEYS = {
@@ -21,7 +17,7 @@ const API_KEYS = {
   helius: process.env.HELIUS_KEY
 };
 
-// --- EVM Helper (Ethereum, Abstract, Monad) ---
+// --- EVM Helper ---
 const fetchAlchemy = async (network, address, chainId) => {
   try {
     const res = await fetch(`https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`);
@@ -38,8 +34,6 @@ const fetchAlchemy = async (network, address, chainId) => {
 };
 
 // --- API ROUTES ---
-
-// EVM Routes
 app.get('/api/nfts/ethereum/:address', (req, res) => fetchAlchemy('eth-mainnet', req.params.address, 'ethereum').then(n => res.json({ nfts: n })));
 app.get('/api/nfts/abstract/:address', (req, res) => fetchAlchemy('abstract-mainnet', req.params.address, 'abstract').then(n => res.json({ nfts: n })));
 app.get('/api/nfts/monad/:address', (req, res) => fetchAlchemy('monad-testnet', req.params.address, 'monad').then(n => res.json({ nfts: n })));
@@ -72,14 +66,32 @@ app.get('/api/nfts/solana/:address', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Cardano Route
+// Cardano Route + Handle Integration
 app.get('/api/nfts/cardano/:address', async (req, res) => {
   try {
-    const stakeRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${req.params.address}`, { headers: { project_id: API_KEYS.blockfrost } });
+    let targetAddress = req.params.address;
+
+    // --- Resolve ADA Handle ---
+    if (targetAddress.startsWith('$')) {
+      const handleName = targetAddress.replace('$', '').toLowerCase();
+      try {
+        const handleRes = await fetch(`https://api.handle.me/handles/${handleName}`);
+        if (handleRes.ok) {
+          const handleData = await handleRes.json();
+          if (handleData.resolved_addresses?.ada) {
+            targetAddress = handleData.resolved_addresses.ada;
+          }
+        }
+      } catch (e) { console.error("Handle resolution error"); }
+    }
+
+    // --- Get Stake Address ---
+    const stakeRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${targetAddress}`, { headers: { project_id: API_KEYS.blockfrost } });
     const stakeData = await stakeRes.json();
     const stakeAddress = stakeData.stake_address;
     if (!stakeAddress) return res.json({ nfts: [] });
 
+    // --- Get Assets ---
     const assetsRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/accounts/${stakeAddress}/addresses/assets`, { headers: { project_id: API_KEYS.blockfrost } });
     const assets = await assetsRes.json();
 
@@ -92,7 +104,6 @@ app.get('/api/nfts/cardano/:address', async (req, res) => {
         let imageUrl = '';
         if (img) {
           if (img.startsWith('ipfs://')) imageUrl = `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}`;
-          else if (img.startsWith('ipfs/')) imageUrl = `https://ipfs.io/ipfs/${img.replace('ipfs/', '')}`;
           else if (img.startsWith('Qm') || img.startsWith('baf')) imageUrl = `https://ipfs.io/ipfs/${img}`;
           else imageUrl = img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`;
         }
@@ -112,8 +123,6 @@ app.get('/api/nfts/cardano/:address', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- CATCH-ALL ROUTE ---
-// Important: This must be the LAST route. It sends the user to the frontend for any non-API URL.
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
