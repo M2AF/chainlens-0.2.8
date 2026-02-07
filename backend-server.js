@@ -36,7 +36,9 @@ const fetchUSDPrice = async (chainId, address) => {
   } catch (e) { return 0; }
 };
 
-// --- Unstoppable Domains Resolution ---
+// --- DOMAIN RESOLUTION ---
+
+// 1. Unstoppable Domains
 app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
   const { domain } = req.params;
   try {
@@ -48,6 +50,48 @@ app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
     const address = data.records?.['crypto.ETH.address'] || data.meta?.owner;
     if (address) res.json({ address });
     else res.status(404).json({ error: 'No EVM address linked.' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 2. ENS Resolution (Ethereum)
+app.get('/api/resolve/ens/:name', async (req, res) => {
+  const { name } = req.params;
+  try {
+    const url = `https://eth-mainnet.g.alchemy.com/v2/${API_KEYS.alchemy}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_resolveName",
+        params: [name],
+        id: 1
+      })
+    });
+    const data = await response.json();
+    if (data.result) res.json({ address: data.result });
+    else res.status(404).json({ error: 'ENS name not resolved.' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 3. ADA Handle Resolution (Cardano)
+app.get('/api/resolve/handle/:handle', async (req, res) => {
+  let handle = req.params.handle.replace('$', '');
+  try {
+    // ADA Handles are NFTs. We first find the asset ID (policyID + hexName)
+    const policyId = "f0a147e63a0f900e606b20f3073380385ef6642d937000305822e0e0";
+    const assetName = Buffer.from(handle).toString('hex');
+    const assetId = policyId + assetName;
+
+    const response = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/assets/${assetId}/addresses`, {
+      headers: { 'project_id': API_KEYS.blockfrost }
+    });
+    const data = await response.json();
+    if (data && data.length > 0) {
+      res.json({ address: data[0].address });
+    } else {
+      res.status(404).json({ error: 'Handle not found.' });
+    }
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -86,7 +130,6 @@ app.get('/api/swap/solana/quote', async (req, res) => {
 // 3. EVM (Uniswap Routing API)
 app.post('/api/swap/evm/quote', async (req, res) => {
   try {
-    // Note: Uniswap's Trading API typically requires a POST with specific body params
     const response = await fetch(`https://api.uniswap.org/v2/quote`, {
       method: 'POST',
       headers: { 
@@ -154,8 +197,11 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
       nativeSymbol = 'MATIC'; nativeName = 'Polygon'; nativeLogo = 'https://cryptologos.cc/logos/polygon-matic-logo.png';
       nativePriceAddr = '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270';
     } else if (chainId === 'abstract') {
-      nativeSymbol = 'ABS'; nativeName = 'Abstract'; nativeLogo = 'https://cryptologos.cc/logos/abstract-abs-logo.png';
-      nativePriceAddr = '0x0000000000000000000000000000000000000000';
+      nativeSymbol = 'ETH'; nativeName = 'Abstract ETH'; nativeLogo = 'https://assets.coingecko.com/coins/images/279/standard/ethereum.png';
+      nativePriceAddr = '0x0000000000000000000000000000000000000000'; // Abstract uses ETH as native
+    } else if (chainId === 'monad') {
+      nativeSymbol = 'MON'; nativeName = 'Monad'; nativeLogo = 'https://pbs.twimg.com/profile_images/1691471780447330304/m0jU6tWj_400x400.jpg';
+      nativePriceAddr = '0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A'; // Wrapped MON
     }
 
     const nativeUsdPrice = await fetchUSDPrice(chainId, nativePriceAddr);
