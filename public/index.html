@@ -71,19 +71,16 @@
       const [evmAddr, setEvmAddr] = useState('');
       const [solAddr, setSolAddr] = useState('');
       const [adaAddr, setAdaAddr] = useState('');
-      // Preserving your exact list of chains including Abstract & Monad
       const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']);
       const [nfts, setNfts] = useState([]);
       const [loading, setLoading] = useState(false);
       const [darkMode, setDarkMode] = useState(false);
       const [selectedNft, setSelectedNft] = useState(null);
-      // NEW: Token Mode State
-      const [tokenMode, setTokenMode] = useState(false);
+      const [tokenMode, setTokenMode] = useState(false); // Token Toggle
 
       const [resolvedEvm, setResolvedEvm] = useState(null);
       const [isResolving, setIsResolving] = useState(false);
 
-      // Preserving styles
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum' },
         polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon' },
@@ -118,7 +115,6 @@
         
         let targetEvm = evmAddr.trim();
 
-        // Unstoppable Domains Resolution (Preserved)
         if (targetEvm.includes('.')) {
           setIsResolving(true);
           try {
@@ -133,8 +129,7 @@
         }
 
         const tasks = [];
-        // NEW: Determine which API path to use based on toggle
-        const modePath = tokenMode ? 'tokens' : 'nfts';
+        const modePath = tokenMode ? 'tokens' : 'nfts'; // Select Route
 
         if (targetEvm.startsWith('0x')) {
           ['ethereum', 'polygon', 'base', 'abstract', 'monad'].forEach(chain => {
@@ -157,7 +152,7 @@
             .flatMap(r => r.value.nfts);
           
           if (!tokenMode) {
-             // Preserved Spam Filter (Only applied to NFTs)
+            // Apply Spam Filter only for NFTs
             const spamWords = ['voucher', 'wen', 'airdrop', 'promo', 'lucky', 'ticket', 'pass', 'jup', 'jupiter', 'unprotected', 'box', 'redeem', 'claim', 'gift'];
             const filtered = combined.filter(nft => {
               const rawName = (nft.name || '').toLowerCase();
@@ -166,8 +161,7 @@
             });
             setNfts(filtered);
           } else {
-            // No spam filter for tokens (dust is filtered on backend)
-            setNfts(combined);
+            setNfts(combined); // Show all tokens
           }
         } catch (e) { console.error("Search error:", e); }
         setLoading(false);
@@ -191,6 +185,7 @@
       return (
         <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
           
+          {/* Dark Mode Toggle */}
           <div className="fixed top-8 right-8 z-50 flex items-center space-x-3 bg-white/10 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-xl">
             <span className="pl-2 text-[9px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
             <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
@@ -255,8 +250,8 @@
               </div>
               
               <div className="flex flex-col md:flex-row items-center gap-6">
-
-                {/* NEW: Token Toggle Grouped with Main Actions */}
+                
+                {/* NEW: Token/NFT Toggle */}
                 <div className="flex items-center space-x-3 px-6 py-4 rounded-2xl border border-white/10 shadow-lg bg-black/5 min-w-[160px]">
                   <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 w-12 text-center">{tokenMode ? 'Tokens' : 'NFTs'}</span>
                   <div onClick={() => setTokenMode(!tokenMode)} className={`switch-bg rounded-full ${tokenMode ? 'bg-emerald-600' : 'bg-slate-300'}`}>
@@ -288,8 +283,8 @@
                   </div>
                   <div className="p-5 text-center">
                     <p className={`font-heading font-bold truncate text-sm uppercase tracking-tight ${darkMode ? 'text-white' : 'text-slate-900'}`}>{nft.name}</p>
-                    {/* NEW: Display Balance in Token Mode */}
-                    {nft.isToken && (
+                    {/* Display Balance ONLY in Token Mode */}
+                    {tokenMode && nft.isToken && (
                       <p className="text-emerald-500 font-bold text-lg mt-1">
                         {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
                       </p>
