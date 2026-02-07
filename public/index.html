@@ -84,7 +84,6 @@
       const [resolvedEvm, setResolvedEvm] = useState(null);
       const [isResolving, setIsResolving] = useState(false);
 
-      // Hidden & Spam State Management
       const [hiddenIds, setHiddenIds] = useState(() => JSON.parse(localStorage.getItem('hiddenAssets') || '[]'));
       const [spamIds, setSpamIds] = useState(() => JSON.parse(localStorage.getItem('spamAssets') || '[]'));
       const [showManager, setShowManager] = useState(false);
@@ -108,7 +107,6 @@
         localStorage.setItem('darkMode', darkMode);
       }, [darkMode]);
 
-      // Sync Hidden/Spam to LocalStorage
       useEffect(() => {
         localStorage.setItem('hiddenAssets', JSON.stringify(hiddenIds));
         localStorage.setItem('spamAssets', JSON.stringify(spamIds));
@@ -119,7 +117,6 @@
         setNfts([]); setResolvedEvm(null);
       };
 
-      // Asset Filtering Logic
       const visibleAssets = useMemo(() => {
         return nfts.filter(nft => {
           const id = nft.id || nft.mint || nft.address;
@@ -190,19 +187,25 @@
             .filter(r => r.status === 'fulfilled' && r.value.nfts)
             .flatMap(r => r.value.nfts);
           
-          // --- IMPROVED DE-DUPLICATION (CHAIN-AWARE) ---
+          // --- ENHANCED DE-DUPLICATION LOGIC ---
           const uniqueMap = new Map();
           combined.forEach(nft => {
-            const assetId = nft.id || nft.mint || nft.address || nft.name;
-            // Create a unique key using the chain + the asset ID
-            const compositeKey = `${nft.chain}-${assetId}`;
+            // Use address if it exists, fallback to id/mint, otherwise name
+            const rawId = nft.address || nft.id || nft.mint || nft.name;
+            
+            // Normalize ID to lowercase to prevent 0xABC vs 0xabc duplicates
+            const normalizedId = String(rawId).toLowerCase();
+            
+            // Create a key unique to the chain so Base ETH and Mainnet ETH stay separate,
+            // but multiple Base ETH entries are collapsed.
+            const compositeKey = `${nft.chain.toLowerCase()}-${normalizedId}`;
             
             if (!uniqueMap.has(compositeKey)) {
               uniqueMap.set(compositeKey, nft);
             }
           });
           const uniqueAssets = Array.from(uniqueMap.values());
-          // --------------------------------------------
+          // ------------------------------------
 
           if (!tokenMode) {
             const spamWords = ['voucher', 'wen', 'airdrop', 'promo', 'lucky', 'ticket', 'pass', 'jup', 'jupiter', 'unprotected', 'box', 'redeem', 'claim', 'gift', 'reward'];
@@ -246,7 +249,6 @@
               />
             </div>
 
-            {/* Input Dashboard Card */}
             <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-6 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-10">
                 <div className="space-y-4">
@@ -308,7 +310,6 @@
               </div>
             </div>
 
-            {/* Results Control Bar */}
             <div className="flex justify-between items-center px-8 py-4 mb-8">
                 <div className="flex items-center space-x-6">
                     <div className="flex items-center space-x-3">
@@ -336,7 +337,6 @@
                 </div>
             </div>
 
-            {/* Assets Area */}
             <div className={isListView ? "flex flex-col gap-4" : "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8"}>
               {visibleAssets.map((nft, i) => (
                 <div key={nft.id || i} 
@@ -347,7 +347,6 @@
                     : `rounded-[2.5rem] shadow-sm flex flex-col ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 hover:-translate-y-2'}`
                   }`}>
                   
-                  {/* Action Buttons */}
                   <div className="absolute top-4 right-4 z-40 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
                     <button 
                       onClick={(e) => toggleHide(e, nft)}
@@ -399,7 +398,6 @@
               ))}
             </div>
 
-            {/* Hidden Assets Manager Modal */}
             {showManager && (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
                 <div className={`max-w-2xl w-full border rounded-[3rem] p-10 shadow-2xl flex flex-col max-h-[80vh] ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
@@ -414,7 +412,7 @@
                     ) : (
                       <>
                         {hiddenList.map(nft => (
-                          <div key={nft.id || nft.mint} className="flex items-center justify-between p-3 rounded-2xl bg-black/20 border border-white/5">
+                          <div key={nft.id || nft.mint || nft.address} className="flex items-center justify-between p-3 rounded-2xl bg-black/20 border border-white/5">
                             <div className="flex items-center gap-4">
                               <img src={nft.image} className="w-10 h-10 rounded-lg object-cover" />
                               <span className="text-xs font-bold uppercase tracking-tighter">{nft.name} (Hidden)</span>
@@ -423,7 +421,7 @@
                           </div>
                         ))}
                         {spamList.map(nft => (
-                          <div key={nft.id || nft.mint} className="flex items-center justify-between p-3 rounded-2xl bg-red-950/20 border border-red-500/10">
+                          <div key={nft.id || nft.mint || nft.address} className="flex items-center justify-between p-3 rounded-2xl bg-red-950/20 border border-red-500/10">
                             <div className="flex items-center gap-4">
                               <img src={nft.image} className="w-10 h-10 rounded-lg object-cover" />
                               <span className="text-xs font-bold uppercase tracking-tighter text-red-400">{nft.name} (Spam)</span>
