@@ -5,6 +5,7 @@ const fetch = require('node-fetch');
 const path = require('path');
 
 const app = express();
+// Using your preferred port from .env or default to 10000
 const PORT = process.env.PORT || 10000; 
 
 app.use(cors());
@@ -16,11 +17,12 @@ const API_KEYS = {
   blockfrost: process.env.BLOCKFROST_KEY,
   helius: process.env.HELIUS_KEY, 
   unstoppable: process.env.UNSTOPPABLE_KEY,
-  zerion: process.env.ZERION_KEY // Added for Monad support
+  zerion: process.env.ZERION_KEY // Required for live Monad portfolio data
 };
 
 // --- Zerion Helper for Monad ---
-// Zerion provides a unified API for Monad balances and NFTs
+// Zerion supports Monad Mainnet (Chain ID 143) from day one.
+// It provides interpreted balances and NFTs without needing raw RPC calls.
 const fetchZerionAssets = async (address, mode) => {
   try {
     const auth = Buffer.from(`${API_KEYS.zerion}:`).toString('base64');
@@ -70,7 +72,9 @@ const fetchUSDPrice = async (chainId, address) => {
   try {
     const chainMap = { 
       'ethereum': 'ethereum', 'base': 'base', 'polygon': 'polygon', 
-      'abstract': 'abstract', 'monad': 'monad', 'solana': 'solana', 'cardano': 'cardano' 
+      'abstract': 'abstract', 
+      'monad': 'monad', // Dexscreener uses 'monad' for mainnet pairs
+      'solana': 'solana', 'cardano': 'cardano' 
     };
     const dsChain = chainMap[chainId] || chainId;
     const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
@@ -97,7 +101,7 @@ app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
 
 // --- EVM NFT Helper ---
 const fetchAlchemyNFTs = async (network, address, chainId) => {
-  if (chainId === 'monad') return fetchZerionAssets(address, 'nfts'); // Route Monad through Zerion
+  if (chainId === 'monad') return fetchZerionAssets(address, 'nfts'); 
   try {
     const url = `https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`;
     const res = await fetch(url);
@@ -116,7 +120,7 @@ const fetchAlchemyNFTs = async (network, address, chainId) => {
 
 // --- EVM Token Helper ---
 const fetchAlchemyTokens = async (network, address, chainId) => {
-  if (chainId === 'monad') return fetchZerionAssets(address, 'tokens'); // Route Monad through Zerion
+  if (chainId === 'monad') return fetchZerionAssets(address, 'tokens');
   try {
     const baseUrl = `https://${network}.g.alchemy.com/v2/${API_KEYS.alchemy}`;
     const nativeTask = fetch(baseUrl, {
@@ -181,7 +185,7 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
 const evmChains = [
   { id: 'ethereum', net: 'eth-mainnet' },
   { id: 'abstract', net: 'abstract-mainnet' },
-  { id: 'monad', net: 'monad-testnet' },
+  { id: 'monad', net: 'monad-mainnet' }, // Correctly updated to Mainnet
   { id: 'base', net: 'base-mainnet' },
   { id: 'polygon', net: 'polygon-mainnet' }
 ];
