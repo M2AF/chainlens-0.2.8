@@ -68,11 +68,9 @@
     const { useState, useEffect } = React;
 
     const App = () => {
-      // RESTORED TEST ADDRESSES
-      const [evmAddr, setEvmAddr] = useState('0x71C7656EC7ab88b098defB751B7401B5f6d8976F');
-      const [solAddr, setSolAddr] = useState('G6X37967H36968436968436968436968436968436');
-      const [adaAddr, setAdaAddr] = useState('$vince');
-      
+      const [evmAddr, setEvmAddr] = useState('');
+      const [solAddr, setSolAddr] = useState('');
+      const [adaAddr, setAdaAddr] = useState('');
       const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']);
       const [nfts, setNfts] = useState([]);
       const [loading, setLoading] = useState(false);
@@ -286,11 +284,10 @@
                   <div className={isListView ? "w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 relative" : "aspect-square relative overflow-hidden bg-slate-100"}>
                     <img src={nft.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                     
-                    {!isListView && (
-                      <div className={`absolute top-4 left-4 px-3 py-1 rounded-full text-[9px] text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
-                        {nft.chain}
-                      </div>
-                    )}
+                    {/* Badge now renders regardless of isListView state */}
+                    <div className={`absolute ${isListView ? 'top-1 left-1 px-1.5 py-0.5 text-[6px]' : 'top-4 left-4 px-3 py-1 text-[9px]'} rounded-full text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
+                      {nft.chain}
+                    </div>
                   </div>
 
                   <div className={isListView ? "flex-1 px-6 flex items-center justify-between overflow-hidden" : "p-5 text-center"}>
@@ -298,12 +295,6 @@
                       <p className={`font-heading font-bold truncate uppercase tracking-tight shrink-0 ${isListView ? 'text-lg max-w-[200px]' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`}>
                         {nft.name}
                       </p>
-                      
-                      {isListView && (
-                        <span className={`px-2 py-0.5 rounded-md text-[8px] text-white font-bold tracking-widest uppercase whitespace-nowrap shadow-sm shrink-0 ${chainStyles[nft.chain]?.color || 'bg-slate-500'}`}>
-                          {nft.chain}
-                        </span>
-                      )}
                     </div>
 
                     {(nft.isToken || tokenMode) && (
