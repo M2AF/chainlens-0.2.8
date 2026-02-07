@@ -16,7 +16,9 @@ const API_KEYS = {
   blockfrost: process.env.BLOCKFROST_KEY,
   helius: process.env.HELIUS_KEY, 
   unstoppable: process.env.UNSTOPPABLE_KEY,
-  dexhunter: process.env.DEXHUNTER_PARTNER_ID // Added for Cardano Swaps
+  dexhunter: process.env.DEXHUNTER_PARTNER_ID,
+  jupiter: process.env.JUPITER_API_KEY, // Optional: Jupiter Pro key
+  uniswap: process.env.UNISWAP_API_KEY  // Optional: Uniswap Routing API key
 };
 
 // --- Price Discovery Helper ---
@@ -49,8 +51,9 @@ app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- DexHunter Cardano Swap Integration ---
-// This endpoint allows your frontend to fetch swap quotes via your partner ID
+// --- SWAP INTEGRATIONS ---
+
+// 1. Cardano (DexHunter)
 app.get('/api/swap/cardano/quote', async (req, res) => {
   const { fromToken, toToken, amount } = req.query;
   try {
@@ -63,7 +66,39 @@ app.get('/api/swap/cardano/quote', async (req, res) => {
     const data = await response.json();
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch swap quote" });
+    res.status(500).json({ error: "Failed to fetch Cardano swap quote" });
+  }
+});
+
+// 2. Solana (Jupiter)
+app.get('/api/swap/solana/quote', async (req, res) => {
+  const { inputMint, outputMint, amount, slippageBps = 50 } = req.query;
+  try {
+    const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=${slippageBps}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch Solana swap quote" });
+  }
+});
+
+// 3. EVM (Uniswap Routing API)
+app.post('/api/swap/evm/quote', async (req, res) => {
+  try {
+    // Note: Uniswap's Trading API typically requires a POST with specific body params
+    const response = await fetch(`https://api.uniswap.org/v2/quote`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-api-key': API_KEYS.uniswap 
+      },
+      body: JSON.stringify(req.body) 
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch EVM swap quote" });
   }
 });
 
