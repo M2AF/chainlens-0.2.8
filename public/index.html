@@ -235,9 +235,12 @@
               <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-10">
                 {/* EVM Address */}
                 <div className="space-y-4">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                    EVM Chains {resolvedEvm && <span className="text-emerald-500 ml-1">✓ RESOLVED</span>}
-                  </label>
+                  <div className="flex justify-between items-end">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                      EVM Chains {resolvedEvm && <span className="text-emerald-500 ml-1">✓ RESOLVED</span>}
+                    </label>
+                    <button onClick={() => { setEvmAddr('0x01faF6DFc230d755141D84d7cB980dd68f5Efe13'); setResolvedEvm(null); }} className="text-[10px] font-bold text-blue-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
+                  </div>
                   <div className="relative">
                     <input type="text" value={evmAddr} onChange={e => { setEvmAddr(e.target.value); setResolvedEvm(null); }} placeholder="0x... or domain" className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200 focus:border-blue-400'}`} />
                     {isResolving && <div className="absolute right-4 top-4 animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
@@ -249,16 +252,26 @@
 
                 {/* Solana Address */}
                 <div className="space-y-4">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
+                  <div className="flex justify-between items-end">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
+                    <button onClick={() => setSolAddr('3noTuHnQdHkat2w5rBx18vAACMzFUvB5LodEe5vMN98d')} className="text-[10px] font-bold text-emerald-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
+                  </div>
                   <input type="text" value={solAddr} onChange={e => setSolAddr(e.target.value)} placeholder="Address..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-400'}`} />
-                  <ChainButton id="solana" />
+                  <div className="flex flex-wrap gap-2">
+                    <ChainButton id="solana" />
+                  </div>
                 </div>
 
                 {/* Cardano Address */}
                 <div className="space-y-4">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
+                  <div className="flex justify-between items-end">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
+                    <button onClick={() => setAdaAddr('addr1q950qv0ks9t29mavulaa5jr3sk2s50r5jfsddydjs0pazrfh32tdpt7zttt4mhl6t9purm4c9rv555z7r5mulq78aleqcg9c9h')} className="text-[10px] font-bold text-cyan-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
+                  </div>
                   <input type="text" value={adaAddr} onChange={e => setAdaAddr(e.target.value)} placeholder="$handle..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-cyan-500' : 'bg-slate-50 border-slate-200 focus:border-cyan-400'}`} />
-                  <ChainButton id="cardano" />
+                  <div className="flex flex-wrap gap-2">
+                    <ChainButton id="cardano" />
+                  </div>
                 </div>
               </div>
               
