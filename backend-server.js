@@ -74,25 +74,39 @@ app.get('/api/resolve/ens/:name', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 3. ADA Handle Resolution (Cardano)
+// 3. ADA Handle Resolution (Cardano) - FIXED VERSION
 app.get('/api/resolve/handle/:handle', async (req, res) => {
-  let handle = req.params.handle.replace('$', '');
+  // Handles are case-insensitive and prefix with '$'
+  let handle = req.params.handle.replace('$', '').toLowerCase();
+  
   try {
-    // ADA Handles are NFTs. We first find the asset ID (policyID + hexName)
-    const policyId = "f0a147e63a0f900e606b20f3073380385ef6642d937000305822e0e0";
-    const assetName = Buffer.from(handle).toString('hex');
-    const assetId = policyId + assetName;
+    // Attempt 1: Official Handle.me API (Best practice)
+    const handleRes = await fetch(`https://api.handle.me/lookup/${handle}`);
+    if (handleRes.ok) {
+      const handleData = await handleRes.json();
+      if (handleData.address) {
+        return res.json({ address: handleData.address });
+      }
+    }
 
-    const response = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/assets/${assetId}/addresses`, {
+    // Attempt 2: Manual Fallback via Blockfrost (Using correct Mainnet Policy ID)
+    const policyId = "f0ff48bbb7bbe9d59a40f1ce90e9e9d0ff5002ec48f232b49ca0fb9a";
+    const assetNameHex = Buffer.from(handle).toString('hex');
+    const assetId = policyId + assetNameHex;
+
+    const bfRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/assets/${assetId}/addresses`, {
       headers: { 'project_id': API_KEYS.blockfrost }
     });
-    const data = await response.json();
-    if (data && data.length > 0) {
-      res.json({ address: data[0].address });
+    const bfData = await bfRes.json();
+
+    if (bfData && bfData.length > 0) {
+      res.json({ address: bfData[0].address });
     } else {
-      res.status(404).json({ error: 'Handle not found.' });
+      res.status(404).json({ error: 'Handle not found or not currently minted.' });
     }
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 // --- SWAP INTEGRATIONS ---
@@ -145,7 +159,8 @@ app.post('/api/swap/evm/quote', async (req, res) => {
   }
 });
 
-// --- EVM NFT Helper ---
+// --- ASSET HELPERS ---
+
 const fetchAlchemyNFTs = async (network, address, chainId) => {
   try {
     const url = `https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`;
@@ -165,12 +180,10 @@ const fetchAlchemyNFTs = async (network, address, chainId) => {
       }
     }));
   } catch (e) { 
-    console.error(`Error fetching NFTs for ${chainId}:`, e);
     return []; 
   }
 };
 
-// --- EVM Token Helper (Native + ERC20) ---
 const fetchAlchemyTokens = async (network, address, chainId) => {
   try {
     const baseUrl = `https://${network}.g.alchemy.com/v2/${API_KEYS.alchemy}`;
@@ -196,28 +209,20 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
     if (chainId === 'polygon') {
       nativeSymbol = 'MATIC'; nativeName = 'Polygon'; nativeLogo = 'https://cryptologos.cc/logos/polygon-matic-logo.png';
       nativePriceAddr = '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270';
-    } else if (chainId === 'abstract') {
-      nativeSymbol = 'ETH'; nativeName = 'Abstract ETH'; nativeLogo = 'https://assets.coingecko.com/coins/images/279/standard/ethereum.png';
-      nativePriceAddr = '0x0000000000000000000000000000000000000000'; // Abstract uses ETH as native
-    } else if (chainId === 'monad') {
-      nativeSymbol = 'MON'; nativeName = 'Monad'; nativeLogo = 'https://pbs.twimg.com/profile_images/1691471780447330304/m0jU6tWj_400x400.jpg';
-      nativePriceAddr = '0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A'; // Wrapped MON
     }
 
     const nativeUsdPrice = await fetchUSDPrice(chainId, nativePriceAddr);
 
     if (nativeRes.result) {
-      const rawNative = parseInt(nativeRes.result, 16);
-      const nativeBalance = rawNative / 1e18;
-      if (nativeBalance > 0) {
+      const balance = parseInt(nativeRes.result, 16) / 1e18;
+      if (balance > 0) {
         tokens.push({
           id: 'native',
           name: nativeName,
           symbol: nativeSymbol,
-          balance: nativeBalance.toFixed(4),
+          balance: balance.toFixed(4),
           usdPrice: nativeUsdPrice,
-          nativePrice: "1.0000",
-          totalValue: (nativeBalance * nativeUsdPrice).toFixed(2),
+          totalValue: (balance * nativeUsdPrice).toFixed(2),
           image: nativeLogo,
           chain: chainId,
           isToken: true
@@ -228,7 +233,7 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
     const balances = erc20Res.result?.tokenBalances || [];
     const nonZero = balances.filter(t => parseInt(t.tokenBalance, 16) > 0).slice(0, 15);
 
-    const erc20Tasks = nonZero.map(async (token) => {
+    const erc20Results = await Promise.all(nonZero.map(async (token) => {
       try {
         const metaRes = await fetch(baseUrl, {
           method: 'POST',
@@ -241,7 +246,6 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
         if (balance < 0.000001) return null;
 
         const usdPrice = await fetchUSDPrice(chainId, token.contractAddress);
-        const nativePrice = nativeUsdPrice > 0 ? (usdPrice / nativeUsdPrice).toFixed(6) : "0.0000";
 
         return {
           id: token.contractAddress,
@@ -249,16 +253,14 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
           symbol: metadata.symbol || '???',
           balance: balance.toFixed(4),
           usdPrice: usdPrice,
-          nativePrice: nativePrice,
           totalValue: (balance * usdPrice).toFixed(2),
           image: metadata.logo || `https://via.placeholder.com/400/334155/ffffff?text=${metadata.symbol || '$'}`,
           chain: chainId,
           isToken: true
         };
       } catch (e) { return null; }
-    });
+    }));
 
-    const erc20Results = await Promise.all(erc20Tasks);
     return [...tokens, ...erc20Results.filter(t => t !== null)];
   } catch (e) { return []; }
 };
@@ -282,21 +284,12 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
   const { mode, address } = req.params;
   try {
     const solPrice = await fetchUSDPrice('solana', 'So11111111111111111111111111111111111111112');
-    
     const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0', id: 'sol-scan', method: 'getAssetsByOwner',
-        params: { 
-          ownerAddress: address, 
-          page: 1, 
-          limit: 100, 
-          options: { 
-            showFungible: mode === 'tokens', 
-            showNativeBalance: mode === 'tokens' 
-          } 
-        }
+        params: { ownerAddress: address, page: 1, limit: 100, options: { showFungible: mode === 'tokens', showNativeBalance: mode === 'tokens' } }
       })
     });
     const data = await response.json();
@@ -306,15 +299,12 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
       const tokens = items.filter(i => i.interface === 'FungibleToken' || i.interface === 'FungibleAsset').map(t => {
         const balanceNum = (t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0));
         const usdPrice = t.token_info?.price_info?.price_per_token || 0;
-        const nativePrice = solPrice > 0 ? (usdPrice / solPrice).toFixed(6) : "0.0000";
-        
         return {
           id: t.id,
           name: t.content?.metadata?.name || 'Solana Token',
           symbol: t.content?.metadata?.symbol || 'SOL',
           balance: balanceNum.toFixed(4),
           usdPrice: usdPrice,
-          nativePrice: nativePrice,
           totalValue: (balanceNum * usdPrice).toFixed(2),
           image: t.content?.links?.image || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
           chain: 'solana',
@@ -342,10 +332,7 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
   const { mode, address } = req.params;
   try {
     const adaPrice = await fetchUSDPrice('cardano', 'cardano');
-    let target = address;
-
-    const addrRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${target}`, { headers: { project_id: API_KEYS.blockfrost } });
-    
+    const addrRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}`, { headers: { project_id: API_KEYS.blockfrost } });
     if (addrRes.status === 404) return res.json({ nfts: [] });
     
     const addrData = await addrRes.json();
@@ -359,12 +346,10 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
       const meta = await metaRes.json();
       const isNFT = parseInt(a.quantity) === 1;
       
-      if (mode === 'tokens' && isNFT) return null;
-      if (mode === 'nfts' && !isNFT) return null;
+      if ((mode === 'tokens' && isNFT) || (mode === 'nfts' && !isNFT)) return null;
 
       const usdPrice = await fetchUSDPrice('cardano', a.unit);
       const balance = (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0));
-      const nativePrice = adaPrice > 0 ? (usdPrice / adaPrice).toFixed(6) : "0.0000";
 
       let img = meta.onchain_metadata?.image || '';
       if (Array.isArray(img)) img = img.join('');
@@ -377,7 +362,6 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
         image: imageUrl || 'https://via.placeholder.com/400/0033AD/ffffff?text=ADA',
         balance: mode === 'tokens' ? balance.toFixed(2) : null,
         usdPrice: usdPrice,
-        nativePrice: nativePrice,
         totalValue: (balance * usdPrice).toFixed(2),
         symbol: meta.metadata?.ticker || '',
         isToken: mode === 'tokens',

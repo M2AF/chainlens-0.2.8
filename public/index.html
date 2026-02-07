@@ -75,9 +75,8 @@
         box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
     }
 
-    /* Fixed Terminal Container Styling */
     .swap-column {
-        height: 850px; /* Increased height to accommodate DexHunter and Jupiter full UI */
+        height: 850px; 
         min-height: 800px;
         width: 100%;
         border-radius: 2rem;
@@ -143,7 +142,6 @@
           const initJup = () => {
             const container = document.getElementById('integrated-terminal');
             if (window.Jupiter && container) {
-              // Clear previous instances if they exist
               container.innerHTML = '';
               window.Jupiter.init({
                 displayMode: "integrated",
@@ -258,7 +256,9 @@
         setResolvedEvm(null);
         
         let targetEvm = evmAddr.trim();
+        let targetAda = adaAddr.trim();
 
+        // 1. Resolve EVM Domains (ENS/Unstoppable)
         if (targetEvm.includes('.')) {
           setIsResolving(true);
           try {
@@ -272,9 +272,23 @@
           setIsResolving(false);
         }
 
+        // 2. Resolve ADA Handles (Cardano) - UPDATED LOGIC
+        if (targetAda && (targetAda.startsWith('$') || !targetAda.startsWith('addr1'))) {
+          setIsResolving(true);
+          try {
+            const res = await fetch(`/api/resolve/handle/${encodeURIComponent(targetAda)}`);
+            const data = await res.json();
+            if (data.address) {
+              targetAda = data.address;
+            }
+          } catch (e) { console.error("ADA Resolution error:", e); }
+          setIsResolving(false);
+        }
+
         const tasks = [];
         const modePath = tokenMode ? 'tokens' : 'nfts';
 
+        // 3. Queue the Scans
         if (targetEvm.startsWith('0x')) {
           ['ethereum', 'polygon', 'base', 'abstract', 'monad'].forEach(chain => {
             if (activeChains.includes(chain)) {
@@ -285,8 +299,8 @@
         if (solAddr.trim() && activeChains.includes('solana')) {
           tasks.push(fetch(`/api/${modePath}/solana/${solAddr.trim()}`).then(r => r.json()));
         }
-        if (adaAddr.trim() && activeChains.includes('cardano')) {
-          tasks.push(fetch(`/api/${modePath}/cardano/${adaAddr.trim()}`).then(r => r.json()));
+        if (targetAda && activeChains.includes('cardano')) {
+          tasks.push(fetch(`/api/${modePath}/cardano/${targetAda}`).then(r => r.json()));
         }
 
         try {
@@ -556,7 +570,6 @@
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {/* EVM Terminal */}
                         <div className={`swap-column border glass-card ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-100 shadow-xl'}`}>
                             <div className="p-4 border-b border-white/5 flex justify-between items-center">
                                 <span className="text-[10px] font-bold uppercase tracking-widest text-blue-500">EVM Terminal</span>
@@ -572,7 +585,6 @@
                             ></iframe>
                         </div>
 
-                        {/* Solana Terminal */}
                         <div className={`swap-column border glass-card ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-100 shadow-xl'}`}>
                             <div className="p-4 border-b border-white/5 flex justify-between items-center">
                                 <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-500">Solana Terminal</span>
@@ -581,7 +593,6 @@
                             <div id="integrated-terminal"></div>
                         </div>
 
-                        {/* Cardano Terminal */}
                         <div className={`swap-column border glass-card ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-100 shadow-xl'}`}>
                             <div className="p-4 border-b border-white/5 flex justify-between items-center">
                                 <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-500">Cardano Terminal</span>
@@ -604,7 +615,6 @@
                 </div>
             )}
 
-            {/* Modals and Overlays */}
             {showManager && (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
                 <div className={`max-w-2xl w-full border rounded-[3rem] p-6 md:p-10 shadow-2xl flex flex-col max-h-[80vh] ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
