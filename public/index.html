@@ -84,7 +84,7 @@
 
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
-        polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon', native: 'MATIC' },
+        polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon', native: 'POL' },
         base: { color: 'bg-[#0052FF]', label: 'Base', native: 'ETH' },
         solana: { color: 'bg-solana-gradient-soft', label: 'Solana', native: 'SOL' },
         cardano: { color: 'bg-[#0033AD]', label: 'Cardano', native: 'ADA' },
@@ -220,7 +220,6 @@
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
                       EVM Chains {resolvedEvm && <span className="text-emerald-500 ml-1">✓ RESOLVED</span>}
                     </label>
-                    <button onClick={() => { setEvmAddr('0x01faF6DFc230d755141D84d7cB980dd68f5Efe13'); setResolvedEvm(null); }} className="text-[10px] font-bold text-blue-500 hover:underline">LOAD TEST</button>
                   </div>
                   <div className="relative">
                     <input 
@@ -241,7 +240,6 @@
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
-                    <button onClick={() => setSolAddr('3noTuHnQdHkat2w5rBx18vAACMzFUvB5LodEe5vMN98d')} className="text-[10px] font-bold text-emerald-500 hover:underline">LOAD TEST</button>
                   </div>
                   <input type="text" value={solAddr} onChange={e => setSolAddr(e.target.value)} placeholder="Address..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-400'}`} />
                   <div className="flex flex-wrap gap-2"><ChainButton id="solana" /></div>
@@ -251,7 +249,6 @@
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
-                    <button onClick={() => setAdaAddr('addr1q950qv0ks9t29mavulaa5jr3sk2s50r5jfsddydjs0pazrfh32tdpt7zttt4mhl6t9purm4c9rv555z7r5mulq78aleqcg9c9h')} className="text-[10px] font-bold text-cyan-500 hover:underline">LOAD TEST</button>
                   </div>
                   <input type="text" value={adaAddr} onChange={e => setAdaAddr(e.target.value)} placeholder="$handle or addr1..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-cyan-500' : 'bg-slate-50 border-slate-200 focus:border-cyan-400'}`} />
                   <div className="flex flex-wrap gap-2"><ChainButton id="cardano" /></div>
@@ -291,6 +288,7 @@
                     : `rounded-[2.5rem] shadow-sm flex flex-col ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 hover:-translate-y-2'}`
                   } ${!tokenMode ? 'cursor-pointer' : ''}`}>
                   
+                  {/* Image Container */}
                   <div className={isListView ? "w-16 h-16 rounded-xl overflow-hidden flex-shrink-0" : "aspect-square relative overflow-hidden bg-slate-100"}>
                     <img src={nft.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                     {!isListView && (
@@ -300,22 +298,29 @@
                     )}
                   </div>
 
-                  <div className={isListView ? "flex-1 px-6 flex items-center justify-between" : "p-5 text-center"}>
-                    <div className={isListView ? "flex flex-col" : ""}>
-                      <p className={`font-heading font-bold truncate uppercase tracking-tight ${isListView ? 'text-lg' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`}>
+                  {/* Info Container */}
+                  <div className={isListView ? "flex-1 px-6 flex items-center justify-between overflow-hidden" : "p-5 text-center"}>
+                    <div className={isListView ? "flex items-center gap-4 min-w-0" : "flex flex-col items-center"}>
+                      <p className={`font-heading font-bold truncate uppercase tracking-tight shrink-0 ${isListView ? 'text-lg max-w-[200px]' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`}>
                         {nft.name}
                       </p>
-                      {isListView && <span className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{nft.chain}</span>}
+                      
+                      {/* Badge - Forces display in List View for both Tokens and NFTs */}
+                      {isListView && (
+                        <span className={`px-2 py-0.5 rounded-md text-[8px] text-white font-bold tracking-widest uppercase whitespace-nowrap shadow-sm shrink-0 ${chainStyles[nft.chain]?.color || 'bg-slate-500'}`}>
+                          {nft.chain}
+                        </span>
+                      )}
                     </div>
 
-                    {nft.isToken && (
-                      <div className={isListView ? "text-right flex flex-col items-end" : "mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
+                    {/* Balance/Price Info */}
+                    {(nft.isToken || tokenMode) && (
+                      <div className={isListView ? "text-right flex flex-col items-end shrink-0" : "mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
                         <p className="text-emerald-500 font-bold text-lg leading-none">
                           {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
                         </p>
                         
                         <div className="flex flex-col mt-1">
-                          {/* UPDATED: Native Pricing Display */}
                           <span className={`font-bold uppercase tracking-tighter ${darkMode ? 'text-blue-400' : 'text-blue-600'} ${isListView ? 'text-[12px]' : 'text-[11px]'}`}>
                              {nft.nativePrice || '0.00'} {chainStyles[nft.chain]?.native || '???'}
                           </span>
@@ -358,7 +363,7 @@
                                 <p className="text-[13px] font-bold truncate mt-1">{String(t.value)}</p>
                               </div>
                             )) : <p className="text-sm italic opacity-40">No attributes found</p>;
-                          })()}\
+                          })()}
                         </div>
                       </div>
                     </div>

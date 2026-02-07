@@ -18,7 +18,7 @@ const API_KEYS = {
   unstoppable: process.env.UNSTOPPABLE_KEY
 };
 
-// --- Updated: Price Discovery Helper ---
+// --- Price Discovery Helper ---
 const fetchUSDPrice = async (chainId, address) => {
   try {
     const chainMap = { 
@@ -51,7 +51,17 @@ app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
 // --- EVM NFT Helper ---
 const fetchAlchemyNFTs = async (network, address, chainId) => {
   try {
-    const res = await fetch(`https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`);
+    // FIX: Handle Abstract/Monad specific RPC endpoints if needed
+    const url = network.includes('abstract') || network.includes('monad') 
+      ? `https://${network}.g.alchemy.com/v2/${API_KEYS.alchemy}`
+      : `https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`;
+
+    if (network.includes('abstract') || network.includes('monad')) {
+       // Newer chains use different NFT fetch logic; defaulting to empty if standard NFT API isn't enabled
+       return [];
+    }
+
+    const res = await fetch(url);
     const data = await res.json();
     return (data.ownedNfts || []).map(nft => ({
       id: `${chainId}-${nft.contract.address}-${nft.tokenId}`,
@@ -85,12 +95,15 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
     const [nativeRes, erc20Res] = await Promise.all([nativeTask, erc20Task]);
     const tokens = [];
 
-    // Identify Native Asset for pricing reference
     let nativeSymbol = 'ETH', nativeName = 'Ether', nativeLogo = 'https://cryptologos.cc/logos/ethereum-eth-logo.png';
-    let nativePriceAddr = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'; // WETH
+    let nativePriceAddr = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'; 
+
     if (chainId === 'polygon') {
       nativeSymbol = 'MATIC'; nativeName = 'Polygon'; nativeLogo = 'https://cryptologos.cc/logos/polygon-matic-logo.png';
       nativePriceAddr = '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270';
+    } else if (chainId === 'abstract') {
+      nativeSymbol = 'ABS'; nativeName = 'Abstract'; nativeLogo = 'https://cryptologos.cc/logos/abstract-abs-logo.png';
+      nativePriceAddr = '0x0000000000000000000000000000000000000000'; // Native
     }
 
     const nativeUsdPrice = await fetchUSDPrice(chainId, nativePriceAddr);
@@ -98,15 +111,14 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
     if (nativeRes.result) {
       const rawNative = parseInt(nativeRes.result, 16);
       const nativeBalance = rawNative / 1e18;
-      
-      if (nativeBalance > 0.0001) {
+      if (nativeBalance > 0) {
         tokens.push({
           id: 'native',
           name: nativeName,
           symbol: nativeSymbol,
           balance: nativeBalance.toFixed(4),
           usdPrice: nativeUsdPrice,
-          nativePrice: "1.0000", // Native asset is always 1:1 with itself
+          nativePrice: "1.0000",
           totalValue: (nativeBalance * nativeUsdPrice).toFixed(2),
           image: nativeLogo,
           chain: chainId,
@@ -128,7 +140,6 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
         const meta = await metaRes.json();
         const metadata = meta.result;
         const balance = parseInt(token.tokenBalance, 16) / Math.pow(10, metadata.decimals || 18);
-        
         if (balance < 0.000001) return null;
 
         const usdPrice = await fetchUSDPrice(chainId, token.contractAddress);
@@ -179,7 +190,15 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0', id: 'sol-scan', method: 'getAssetsByOwner',
-        params: { ownerAddress: address, page: 1, limit: 100, displayOptions: { showFungible: mode === 'tokens', showNativeBalance: mode === 'tokens' } }
+        params: { 
+          ownerAddress: address, 
+          page: 1, 
+          limit: 100, 
+          options: { // Helius uses 'options' for these flags
+            showFungible: mode === 'tokens', 
+            showNativeBalance: mode === 'tokens' 
+          } 
+        }
       })
     });
     const data = await response.json();
@@ -226,14 +245,12 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
   try {
     const adaPrice = await fetchUSDPrice('cardano', 'cardano');
     let target = address;
-    if (target.startsWith('$')) {
-      const hRes = await fetch(`https://api.handle.me/handles/${target.replace('$', '').toLowerCase()}`);
-      if (hRes.ok) {
-        const hData = await hRes.json();
-        if (hData.resolved_addresses?.ada) target = hData.resolved_addresses.ada;
-      }
-    }
+
     const addrRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${target}`, { headers: { project_id: API_KEYS.blockfrost } });
+    
+    // FIX: If address is not found (404), it's likely a valid but unused address. Return empty array instead of failing.
+    if (addrRes.status === 404) return res.json({ nfts: [] });
+    
     const addrData = await addrRes.json();
     if (!addrData.stake_address) return res.json({ nfts: [] });
 
