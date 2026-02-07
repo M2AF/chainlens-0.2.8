@@ -3,61 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <title>ChainLens | Multi-Chain Asset Scanner</title>
-  
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
-
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Space Grotesk', 'sans-serif'],
-            heading: ['Syne', 'sans-serif'],
-          }
-        }
-      }
-    }
-  </script>
-
   <style>
-    body { font-family: 'Space Grotesk', sans-serif; scroll-behavior: smooth; }
+    body { font-family: 'Space Grotesk', sans-serif; }
     .font-heading { font-family: 'Syne', sans-serif; }
-    
-    .bg-solana-gradient {
-      background: linear-gradient(45deg, #9945FF, #14F195);
-    }
-    .bg-solana-gradient-soft {
-      background: linear-gradient(45deg, rgba(153,69,255,0.85), rgba(20,241,149,0.85));
-    }
-
-    .switch-bg {
-      width: 54px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      padding: 4px;
-      cursor: pointer;
-      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .switch-dot {
-      width: 20px;
-      height: 20px;
-      transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-    }
+    .switch-bg { width: 54px; height: 28px; display: flex; align-items: center; padding: 4px; cursor: pointer; transition: 0.4s; }
+    .switch-dot { width: 20px; height: 20px; transition: 0.4s; }
     .translate-x-6 { transform: translateX(26px); }
-
-    .modal-enter { animation: fadeIn 0.3s ease-out; }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
+    .bg-solana { background: linear-gradient(45deg, #9945FF, #14F195); }
     .dark-scroll::-webkit-scrollbar { width: 8px; }
-    .dark-scroll::-webkit-scrollbar-track { background: #0f172a; }
     .dark-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
   </style>
 </head>
@@ -71,262 +30,119 @@
       const [evmAddr, setEvmAddr] = useState('');
       const [solAddr, setSolAddr] = useState('');
       const [adaAddr, setAdaAddr] = useState('');
-      const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']);
       const [nfts, setNfts] = useState([]);
       const [loading, setLoading] = useState(false);
-      const [darkMode, setDarkMode] = useState(false);
+      const [darkMode, setDarkMode] = useState(localStorage.getItem('darkMode') === 'true');
+      const [tokenMode, setTokenMode] = useState(false);
+      const [viewMode, setViewMode] = useState(localStorage.getItem('viewMode') || 'grid');
       const [selectedNft, setSelectedNft] = useState(null);
-      const [tokenMode, setTokenMode] = useState(false); // Token Toggle
-
-      const [resolvedEvm, setResolvedEvm] = useState(null);
-      const [isResolving, setIsResolving] = useState(false);
 
       const chainStyles = {
-        ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum' },
-        polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon' },
-        base: { color: 'bg-[#0052FF]', label: 'Base' },
-        solana: { color: 'bg-solana-gradient-soft', label: 'Solana' },
-        cardano: { color: 'bg-[#0033AD]', label: 'Cardano' },
-        monad: { color: 'bg-[#836EF9]', label: 'Monad' },
-        abstract: { color: 'bg-[#00FF85] text-black', label: 'Abstract' }
+        ethereum: { color: 'bg-slate-700', label: 'Ethereum' },
+        polygon: { color: 'bg-purple-600', label: 'Polygon' },
+        base: { color: 'bg-blue-600', label: 'Base' },
+        solana: { color: 'bg-solana', label: 'Solana' },
+        cardano: { color: 'bg-blue-800', label: 'Cardano' },
+        monad: { color: 'bg-indigo-500', label: 'Monad' },
+        abstract: { color: 'bg-emerald-400 text-black', label: 'Abstract' }
       };
-
-      useEffect(() => {
-        const savedMode = localStorage.getItem('darkMode');
-        if (savedMode === 'true') setDarkMode(true);
-      }, []);
 
       useEffect(() => {
         localStorage.setItem('darkMode', darkMode);
-      }, [darkMode]);
-
-      const clearAll = () => {
-        setEvmAddr('');
-        setSolAddr('');
-        setAdaAddr('');
-        setNfts([]);
-        setResolvedEvm(null);
-      };
+        localStorage.setItem('viewMode', viewMode);
+      }, [darkMode, viewMode]);
 
       const handleSearch = async () => {
-        setLoading(true);
-        setNfts([]);
-        setResolvedEvm(null);
-        
-        let targetEvm = evmAddr.trim();
-
-        if (targetEvm.includes('.')) {
-          setIsResolving(true);
-          try {
-            const res = await fetch(`/api/resolve/unstoppable/${targetEvm}`);
-            const data = await res.json();
-            if (data.address) {
-              targetEvm = data.address;
-              setResolvedEvm(data.address);
-            }
-          } catch (e) { console.error("Resolution error:", e); }
-          setIsResolving(false);
-        }
-
+        setLoading(true); setNfts([]);
+        const modePath = tokenMode ? 'tokens' : 'nfts';
         const tasks = [];
-        const modePath = tokenMode ? 'tokens' : 'nfts'; // Select Route
 
-        if (targetEvm.startsWith('0x')) {
-          ['ethereum', 'polygon', 'base', 'abstract', 'monad'].forEach(chain => {
-            if (activeChains.includes(chain)) {
-              tasks.push(fetch(`/api/${modePath}/${chain}/${targetEvm}`).then(r => r.json()));
-            }
-          });
-        }
-        if (solAddr.trim() && activeChains.includes('solana')) {
-          tasks.push(fetch(`/api/${modePath}/solana/${solAddr.trim()}`).then(r => r.json()));
-        }
-        if (adaAddr.trim() && activeChains.includes('cardano')) {
-          tasks.push(fetch(`/api/${modePath}/cardano/${adaAddr.trim()}`).then(r => r.json()));
-        }
+        if (evmAddr.startsWith('0x')) ['ethereum', 'polygon', 'base', 'abstract', 'monad'].forEach(c => tasks.push(fetch(`/api/${modePath}/${c}/${evmAddr}`).then(r => r.json())));
+        if (solAddr) tasks.push(fetch(`/api/${modePath}/solana/${solAddr}`).then(r => r.json()));
+        if (adaAddr) tasks.push(fetch(`/api/${modePath}/cardano/${adaAddr}`).then(r => r.json()));
 
         try {
           const results = await Promise.allSettled(tasks);
-          const combined = results
-            .filter(r => r.status === 'fulfilled' && r.value.nfts)
-            .flatMap(r => r.value.nfts);
-          
-          if (!tokenMode) {
-            // Apply Spam Filter only for NFTs
-            const spamWords = ['voucher', 'wen', 'airdrop', 'promo', 'lucky', 'ticket', 'pass', 'jup', 'jupiter', 'unprotected', 'box', 'redeem', 'claim', 'gift'];
-            const filtered = combined.filter(nft => {
-              const rawName = (nft.name || '').toLowerCase();
-              const name = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "");
-              return !spamWords.some(word => name.includes(word));
-            });
-            setNfts(filtered);
-          } else {
-            setNfts(combined); // Show all tokens
-          }
-        } catch (e) { console.error("Search error:", e); }
+          const combined = results.filter(r => r.status === 'fulfilled' && r.value.nfts).flatMap(r => r.value.nfts);
+          setNfts(combined);
+        } catch (e) { console.error(e); }
         setLoading(false);
       };
 
-      const ChainButton = ({ id }) => {
-        const style = chainStyles[id];
-        const isActive = activeChains.includes(id);
-        const activeBgClass = id === 'solana' ? 'bg-solana-gradient' : style.color;
-        
-        return (
-          <button onClick={() => setActiveChains(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])} 
-            className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all border-2 
-            ${isActive ? `${activeBgClass} text-white border-transparent shadow-lg scale-105` 
-            : darkMode ? 'bg-slate-800 text-slate-500 border-slate-700' : 'bg-white text-slate-300 border-slate-100'}`}>
-            {style.label}
-          </button>
-        );
-      };
+      const Toggle = ({ active, onToggle, labelOn, labelOff, color = 'bg-blue-600' }) => (
+        <div className="flex items-center space-x-3 px-4 py-2 rounded-xl bg-black/5 border border-white/10">
+          <span className="text-[9px] font-bold uppercase tracking-widest opacity-60 w-10 text-center">{active ? labelOn : labelOff}</span>
+          <div onClick={onToggle} className={`switch-bg rounded-full ${active ? color : 'bg-slate-300'}`}>
+            <div className={`switch-dot rounded-full bg-white shadow-lg ${active ? 'translate-x-6' : 'translate-x-0'}`} />
+          </div>
+        </div>
+      );
 
       return (
-        <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
-          
-          {/* Dark Mode Toggle */}
-          <div className="fixed top-8 right-8 z-50 flex items-center space-x-3 bg-white/10 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-xl">
-            <span className="pl-2 text-[9px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-            <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-              <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
-            </div>
+        <div className={`min-h-screen p-8 transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
+          <div className="fixed top-8 right-8 z-50 flex items-center space-x-4">
+            <Toggle active={darkMode} onToggle={() => setDarkMode(!darkMode)} labelOn="Dark" labelOff="Light" />
           </div>
 
-          <div className="max-w-6xl mx-auto p-8 pt-16">
+          <div className="max-w-6xl mx-auto pt-10">
             <div className="flex flex-col items-center mb-12">
-              <img 
-                src={darkMode ? "/ChainLens (dark).png" : "/ChainLens (light).png"} 
-                alt="ChainLens Logo" 
-                className="h-64 w-auto object-contain transition-transform duration-700 hover:scale-105" 
-              />
+              <img src={darkMode ? "/ChainLens (dark).png" : "/ChainLens (light).png"} className="h-48 mb-8" />
             </div>
 
-            <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-20 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-10">
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                      EVM Chains {resolvedEvm && <span className="text-emerald-500 ml-1">✓ RESOLVED</span>}
-                    </label>
-                    <button onClick={() => { setEvmAddr('0x01faF6DFc230d755141D84d7cB980dd68f5Efe13'); setResolvedEvm(null); }} className="text-[10px] font-bold text-blue-500 hover:underline">LOAD TEST</button>
+            <div className={`p-10 rounded-[3rem] border shadow-2xl mb-12 ${darkMode ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-100'}`}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+                {['EVM', 'Solana', 'Cardano'].map((label, i) => (
+                  <div key={i} className="space-y-3">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{label} Address</label>
+                    <input type="text" onChange={e => i===0?setEvmAddr(e.target.value):i===1?setSolAddr(e.target.value):setAdaAddr(e.target.value)} className={`w-full p-4 rounded-xl border outline-none ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`} placeholder="Enter address..." />
                   </div>
-                  <div className="relative">
-                    <input 
-                      type="text" 
-                      value={evmAddr} 
-                      onChange={e => { setEvmAddr(e.target.value); setResolvedEvm(null); }} 
-                      placeholder="0x... or .crypto domain" 
-                      className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200 focus:border-blue-400'}`} 
-                    />
-                    {isResolving && <div className="absolute right-4 top-4 animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <ChainButton id="ethereum" />
-                    <ChainButton id="polygon" />
-                    <ChainButton id="base" />
-                    <ChainButton id="abstract" />
-                    <ChainButton id="monad" />
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
-                    <button onClick={() => setSolAddr('3noTuHnQdHkat2w5rBx18vAACMzFUvB5LodEe5vMN98d')} className="text-[10px] font-bold text-emerald-500 hover:underline">LOAD TEST</button>
-                  </div>
-                  <input type="text" value={solAddr} onChange={e => setSolAddr(e.target.value)} placeholder="Address..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-400'}`} />
-                  <div className="flex flex-wrap gap-2"><ChainButton id="solana" /></div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
-                    <button onClick={() => setAdaAddr('addr1q950qv0ks9t29mavulaa5jr3sk2s50r5jfsddydjs0pazrfh32tdpt7zttt4mhl6t9purm4c9rv555z7r5mulq78aleqcg9c9h')} className="text-[10px] font-bold text-cyan-500 hover:underline">LOAD TEST</button>
-                  </div>
-                  <input type="text" value={adaAddr} onChange={e => setAdaAddr(e.target.value)} placeholder="$handle or addr1..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-cyan-500' : 'bg-slate-50 border-slate-200 focus:border-cyan-400'}`} />
-                  <div className="flex flex-wrap gap-2"><ChainButton id="cardano" /></div>
-                </div>
+                ))}
               </div>
-              
-              <div className="flex flex-col md:flex-row items-center gap-6">
-                
-                {/* NEW: Token/NFT Toggle */}
-                <div className="flex items-center space-x-3 px-6 py-4 rounded-2xl border border-white/10 shadow-lg bg-black/5 min-w-[160px]">
-                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 w-12 text-center">{tokenMode ? 'Tokens' : 'NFTs'}</span>
-                  <div onClick={() => setTokenMode(!tokenMode)} className={`switch-bg rounded-full ${tokenMode ? 'bg-emerald-600' : 'bg-slate-300'}`}>
-                    <div className={`switch-dot rounded-full bg-white shadow-lg ${tokenMode ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </div>
-                </div>
 
-                <button 
-                  onClick={handleSearch} 
-                  disabled={loading} 
-                  className={`flex-1 py-7 rounded-2xl font-sans font-bold text-4xl uppercase tracking-widest transition-all active:scale-[0.98] ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
-                  {loading ? 'ANALYZING LEDGERS...' : 'SCAN ASSETS'}
-                </button>
-
-                <button onClick={clearAll} className={`px-10 py-7 rounded-2xl font-heading font-bold text-xl tracking-tighter border-2 transition-all active:scale-[0.98] ${darkMode ? 'border-slate-800 text-slate-500 hover:border-red-500 hover:text-red-500' : 'border-slate-200 text-slate-400 hover:border-red-500 hover:text-red-500'}`}>
-                  CLEAR
+              <div className="flex flex-col md:flex-row items-center gap-4">
+                <Toggle active={tokenMode} onToggle={() => setTokenMode(!tokenMode)} labelOn="Tokens" labelOff="NFTs" color="bg-emerald-500" />
+                <Toggle active={viewMode === 'list'} onToggle={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} labelOn="List" labelOff="Grid" color="bg-purple-500" />
+                <button onClick={handleSearch} className={`flex-1 py-5 rounded-2xl font-bold text-2xl uppercase tracking-widest ${darkMode ? 'bg-white text-black' : 'bg-slate-900 text-white'}`}>
+                  {loading ? 'Scanning...' : 'Scan Assets'}
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8">
-              {nfts.map((nft, i) => (
-                <div key={i} onClick={() => !tokenMode && setSelectedNft(nft)} className={`group rounded-[2.5rem] overflow-hidden shadow-sm border ${!tokenMode ? 'cursor-pointer hover:-translate-y-2' : ''} transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-                  <div className="aspect-square relative overflow-hidden bg-slate-100">
-                    <img src={nft.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-                    <div className={`absolute top-4 left-4 px-3 py-1 rounded-full text-[9px] text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
-                      {nft.chain}
+            {/* ASSET DISPLAY */}
+            {viewMode === 'grid' ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                {nfts.map((nft, i) => (
+                  <div key={i} className={`rounded-[2rem] overflow-hidden border transition-all hover:-translate-y-1 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 shadow-sm'}`}>
+                    <div className="aspect-square bg-slate-200 relative">
+                      <img src={nft.image} className="w-full h-full object-cover" />
+                      <div className={`absolute top-3 left-3 px-2 py-0.5 rounded-full text-[8px] text-white font-bold uppercase ${chainStyles[nft.chain]?.color}`}>{nft.chain}</div>
+                    </div>
+                    <div className="p-4 text-center">
+                      <p className="font-heading font-bold truncate text-xs mb-1 uppercase tracking-tighter">{nft.name}</p>
+                      <p className="text-emerald-500 font-bold text-sm">${tokenMode ? nft.totalValue : nft.usdPrice}</p>
+                      <p className="text-[10px] opacity-50 uppercase font-bold">{tokenMode ? `${nft.balance} ${nft.symbol}` : 'Floor Price'}</p>
                     </div>
                   </div>
-                  <div className="p-5 text-center">
-                    <p className={`font-heading font-bold truncate text-sm uppercase tracking-tight ${darkMode ? 'text-white' : 'text-slate-900'}`}>{nft.name}</p>
-                    {/* Display Balance ONLY in Token Mode */}
-                    {tokenMode && nft.isToken && (
-                      <p className="text-emerald-500 font-bold text-lg mt-1">
-                        {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {selectedNft && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
-                <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-12 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100'}`}>
-                  <button onClick={() => setSelectedNft(null)} className="absolute top-10 right-10 w-12 h-12 flex items-center justify-center rounded-full bg-slate-800 hover:bg-red-500 text-white transition-all font-bold">✕</button>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                    <div className="rounded-[2.5rem] overflow-hidden shadow-2xl bg-black/5 aspect-square relative">
-                       <img src={selectedNft.image} className="w-full h-full object-contain" />
-                       <div className={`absolute top-6 left-6 px-4 py-1.5 rounded-full text-white text-[10px] font-bold uppercase tracking-widest backdrop-blur-md border border-white/20 shadow-lg ${chainStyles[selectedNft.chain]?.color}`}>
-                          {selectedNft.chain}
-                        </div>
-                    </div>
-                    <div className="space-y-8">
-                      <div>
-                        <h2 className="text-4xl font-heading font-extrabold uppercase tracking-tighter leading-none">{selectedNft.name}</h2>
-                      </div>
-                      <div className="space-y-4">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">On-Chain Metadata</label>
-                        <div className="grid grid-cols-2 gap-3">
-                          {(() => {
-                            const raw = selectedNft.metadata?.traits || [];
-                            const normalized = Array.isArray(raw) ? raw : Object.entries(raw).map(([k, v]) => ({ trait_type: k, value: v }));
-                            return normalized.length > 0 ? normalized.map((t, idx) => (
-                              <div key={idx} className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">{t.trait_type || t.key || 'Trait'}</p>
-                                <p className="text-[13px] font-bold truncate mt-1">{String(t.value)}</p>
-                              </div>
-                            )) : <p className="text-sm italic opacity-40">No attributes found</p>;
-                          })()}
-                        </div>
+                ))}
+              </div>
+            ) : (
+              <div className={`rounded-3xl border divide-y overflow-hidden ${darkMode ? 'bg-slate-900 border-slate-800 divide-slate-800' : 'bg-white border-slate-100 divide-slate-100 shadow-lg'}`}>
+                {nfts.map((nft, i) => (
+                  <div key={i} className="flex items-center p-4 hover:bg-black/5 transition-colors">
+                    <img src={nft.image} className="w-14 h-14 rounded-xl object-cover mr-6 bg-slate-200" />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-heading font-bold text-sm truncate uppercase tracking-tight">{nft.name}</h4>
+                      <div className="flex items-center mt-1 space-x-2">
+                         <span className={`px-2 py-0.5 rounded-md text-[8px] font-bold text-white uppercase ${chainStyles[nft.chain]?.color}`}>{nft.chain}</span>
+                         <span className="text-[10px] opacity-50 font-bold uppercase">{nft.collection || nft.symbol}</span>
                       </div>
                     </div>
+                    <div className="text-right">
+                      <p className="font-bold text-lg text-emerald-500">${tokenMode ? nft.totalValue : nft.usdPrice}</p>
+                      <p className="text-[10px] font-bold opacity-60 uppercase">{tokenMode ? `${nft.balance} ${nft.symbol}` : `Price: $${nft.usdPrice}`}</p>
+                    </div>
                   </div>
-                </div>
+                ))}
               </div>
             )}
           </div>
