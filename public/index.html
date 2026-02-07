@@ -75,6 +75,7 @@
       const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']);
       
       const [nfts, setNfts] = useState([]);
+      const [hiddenIds, setHiddenIds] = useState([]); // Track hidden asset IDs
       const [loading, setLoading] = useState(false);
       const [darkMode, setDarkMode] = useState(false);
       const [selectedAsset, setSelectedAsset] = useState(null);
@@ -105,7 +106,12 @@
 
       const clearAll = () => {
         setEvmAddr(''); setSolAddr(''); setAdaAddr('');
-        setNfts([]); setResolvedEvm(null);
+        setNfts([]); setResolvedEvm(null); setHiddenIds([]);
+      };
+
+      const toggleHideAsset = (e, assetId) => {
+        e.stopPropagation(); // Don't open the modal
+        setHiddenIds(prev => [...prev, assetId]);
       };
 
       const handleSearch = async () => {
@@ -256,28 +262,36 @@
             </div>
 
             {/* Results Control Bar */}
-            <div className="flex justify-between items-center px-8 py-4 mb-8">
-                <div className="flex items-center space-x-3">
-                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 min-w-[70px]">
-                        {isListView ? 'List View' : 'Grid View'}
-                    </span>
-                    <div onClick={() => setIsListView(!isListView)} className={`switch-bg rounded-full ${isListView ? 'bg-indigo-600' : 'bg-slate-300'}`}>
-                        <div className={`switch-dot rounded-full bg-white shadow-lg ${isListView ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </div>
+            <div className="flex flex-wrap justify-between items-center px-8 py-4 mb-8 gap-4">
+                <div className="flex items-center space-x-6">
+                  <div className="flex items-center space-x-3">
+                      <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 min-w-[70px]">
+                          {isListView ? 'List View' : 'Grid View'}
+                      </span>
+                      <div onClick={() => setIsListView(!isListView)} className={`switch-bg rounded-full ${isListView ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                          <div className={`switch-dot rounded-full bg-white shadow-lg ${isListView ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </div>
+                  </div>
+
+                  <div className="flex items-center space-x-3">
+                      <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
+                      <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                          <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center space-x-3">
-                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-                    <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                        <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </div>
-                </div>
+                {hiddenIds.length > 0 && (
+                  <button onClick={() => setHiddenIds([])} className={`px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-all ${darkMode ? 'border-slate-700 bg-slate-900 text-blue-400 hover:bg-slate-800' : 'border-slate-200 bg-white text-blue-600 hover:bg-slate-50'}`}>
+                    Restore Hidden ({hiddenIds.length})
+                  </button>
+                )}
             </div>
 
             {/* Assets Area */}
             <div className={isListView ? "flex flex-col gap-4" : "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8"}>
-              {nfts.map((nft, i) => (
-                <div key={i} 
+              {nfts.filter(nft => !hiddenIds.includes(nft.id)).map((nft, i) => (
+                <div key={nft.id || i} 
                   onClick={() => setSelectedAsset(nft)} 
                   className={`group relative overflow-hidden border transition-all cursor-pointer ${
                     isListView 
@@ -285,6 +299,13 @@
                     : `rounded-[2.5rem] shadow-sm flex flex-col ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 hover:-translate-y-2'}`
                   }`}>
                   
+                  {/* Hide Button (Overlay) */}
+                  <button 
+                    onClick={(e) => toggleHideAsset(e, nft.id)}
+                    className={`absolute top-2 right-2 z-20 w-8 h-8 flex items-center justify-center rounded-full bg-black/40 hover:bg-red-500 text-white backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all text-xs font-bold`}>
+                    ✕
+                  </button>
+
                   <div className={isListView ? "w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 relative" : "aspect-square relative overflow-hidden bg-slate-100"}>
                     <img src={nft.image || `https://via.placeholder.com/400/334155/ffffff?text=${nft.symbol || '?'}`} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                     <div className={`absolute ${isListView ? 'top-1 left-1 px-1.5 py-0.5 text-[6px]' : 'top-4 left-4 px-3 py-1 text-[9px]'} rounded-full text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
