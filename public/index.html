@@ -71,11 +71,12 @@
       const [evmAddr, setEvmAddr] = useState('');
       const [solAddr, setSolAddr] = useState('');
       const [adaAddr, setAdaAddr] = useState('');
-      const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano']);
-      const [items, setItems] = useState([]); // Shared state for NFTs and Tokens
+      // Preserved active chains including Abstract & Monad
+      const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']);
+      const [items, setItems] = useState([]);
       const [loading, setLoading] = useState(false);
       const [darkMode, setDarkMode] = useState(false);
-      const [tokenMode, setTokenMode] = useState(false); 
+      const [tokenMode, setTokenMode] = useState(false); // NEW: Token Mode State
       const [selectedNft, setSelectedNft] = useState(null);
 
       const [resolvedEvm, setResolvedEvm] = useState(null);
@@ -129,23 +130,20 @@
         }
 
         const tasks = [];
+        // Determine API path based on Token Mode
         const modePath = tokenMode ? 'tokens' : 'nfts';
 
-        // EVM chains (using the mode switch)
         if (targetEvm.startsWith('0x')) {
-          ['ethereum', 'polygon', 'base'].forEach(chain => {
+          ['ethereum', 'polygon', 'base', 'abstract', 'monad'].forEach(chain => {
             if (activeChains.includes(chain)) {
               tasks.push(fetch(`/api/${modePath}/${chain}/${targetEvm}`).then(r => r.json()));
             }
           });
         }
-        
-        // Solana (using the mode switch)
         if (solAddr.trim() && activeChains.includes('solana')) {
           tasks.push(fetch(`/api/${modePath}/solana/${solAddr.trim()}`).then(r => r.json()));
         }
-
-        // Cardano (Original logic only supports NFTs currently)
+        // Cardano logic remains NFT-only for now as per "working" state
         if (!tokenMode && adaAddr.trim() && activeChains.includes('cardano')) {
           tasks.push(fetch(`/api/nfts/cardano/${adaAddr.trim()}`).then(r => r.json()));
         }
@@ -157,7 +155,7 @@
             .flatMap(r => r.value.nfts);
           
           if (!tokenMode) {
-            // Anti-spam filtering for NFTs
+            // Apply spam filter ONLY for NFTs
             const spamWords = ['voucher', 'wen', 'airdrop', 'promo', 'lucky', 'ticket', 'pass', 'jup', 'jupiter', 'unprotected', 'box', 'redeem', 'claim', 'gift'];
             const filtered = combined.filter(nft => {
               const rawName = (nft.name || '').toLowerCase();
@@ -166,7 +164,7 @@
             });
             setItems(filtered);
           } else {
-            // Tokens (Native & Memes) go directly to display
+            // Show all tokens (backend already filters dust)
             setItems(combined);
           }
         } catch (e) { console.error("Search error:", e); }
@@ -191,7 +189,6 @@
       return (
         <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
           
-          {/* Dark Mode Toggle */}
           <div className="fixed top-8 right-8 z-50 flex items-center space-x-3 bg-white/10 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-xl">
             <span className="pl-2 text-[9px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
             <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
@@ -209,7 +206,6 @@
             </div>
 
             <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-20 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
-              {/* Inputs Grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-10">
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
@@ -232,6 +228,8 @@
                     <ChainButton id="ethereum" />
                     <ChainButton id="polygon" />
                     <ChainButton id="base" />
+                    <ChainButton id="abstract" />
+                    <ChainButton id="monad" />
                   </div>
                 </div>
 
@@ -254,9 +252,9 @@
                 </div>
               </div>
               
-              {/* Action Bar */}
               <div className="flex flex-col md:flex-row items-center gap-6">
-                {/* Repositioned Token Toggle: Left Side */}
+                
+                {/* NEW: Token/NFT Toggle */}
                 <div className="flex items-center space-x-3 px-6 py-4 rounded-2xl border border-white/10 shadow-lg bg-black/5 min-w-[160px]">
                   <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 w-12 text-center">{tokenMode ? 'Tokens' : 'NFTs'}</span>
                   <div onClick={() => setTokenMode(!tokenMode)} className={`switch-bg rounded-full ${tokenMode ? 'bg-emerald-600' : 'bg-slate-300'}`}>
@@ -277,10 +275,10 @@
               </div>
             </div>
 
-            {/* Result Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8">
               {items.map((item, i) => (
-                <div key={i} onClick={() => !tokenMode && setSelectedNft(item)} className={`group rounded-[2.5rem] overflow-hidden shadow-sm border transition-all ${!tokenMode ? 'cursor-pointer hover:-translate-y-2' : ''} ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
+                // Only allow click (Modal) if NOT in token mode
+                <div key={i} onClick={() => !tokenMode && setSelectedNft(item)} className={`group rounded-[2.5rem] overflow-hidden shadow-sm border ${!tokenMode ? 'cursor-pointer hover:-translate-y-2' : ''} transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
                   <div className="aspect-square relative overflow-hidden bg-slate-100">
                     <img src={item.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                     <div className={`absolute top-4 left-4 px-3 py-1 rounded-full text-[9px] text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[item.chain]?.color}`}>
@@ -289,6 +287,7 @@
                   </div>
                   <div className="p-5 text-center">
                     <p className={`font-heading font-bold truncate text-sm uppercase tracking-tight ${darkMode ? 'text-white' : 'text-slate-900'}`}>{item.name}</p>
+                    {/* Token Mode: Show Balance */}
                     {item.isToken && (
                       <p className="text-emerald-500 font-bold text-lg mt-1">
                         {item.balance} <span className="text-[10px] opacity-60">{item.symbol}</span>
@@ -299,7 +298,6 @@
               ))}
             </div>
 
-            {/* NFT Modal */}
             {selectedNft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
                 <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-12 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100'}`}>
