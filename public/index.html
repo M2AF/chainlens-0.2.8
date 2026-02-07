@@ -108,6 +108,11 @@
         setNfts([]); setResolvedEvm(null);
       };
 
+      const hideAsset = (e, index) => {
+        e.stopPropagation(); // Prevents the modal from opening
+        setNfts(prev => prev.filter((_, i) => i !== index));
+      };
+
       const handleSearch = async () => {
         setLoading(true);
         setNfts([]);
@@ -277,7 +282,7 @@
             {/* Assets Area */}
             <div className={isListView ? "flex flex-col gap-4" : "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8"}>
               {nfts.map((nft, i) => (
-                <div key={i} 
+                <div key={nft.id || i} 
                   onClick={() => setSelectedAsset(nft)} 
                   className={`group relative overflow-hidden border transition-all cursor-pointer ${
                     isListView 
@@ -285,6 +290,14 @@
                     : `rounded-[2.5rem] shadow-sm flex flex-col ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 hover:-translate-y-2'}`
                   }`}>
                   
+                  {/* Hide Button - Stabilized */}
+                  <button 
+                    onClick={(e) => hideAsset(e, i)}
+                    className="absolute top-4 right-4 z-40 w-8 h-8 flex items-center justify-center rounded-full bg-red-500/10 hover:bg-red-500 text-transparent hover:text-white transition-all backdrop-blur-sm border border-red-500/20 opacity-0 group-hover:opacity-100"
+                  >
+                    <span className="text-xs font-bold pointer-events-none">✕</span>
+                  </button>
+
                   <div className={isListView ? "w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 relative" : "aspect-square relative overflow-hidden bg-slate-100"}>
                     <img src={nft.image || `https://via.placeholder.com/400/334155/ffffff?text=${nft.symbol || '?'}`} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                     <div className={`absolute ${isListView ? 'top-1 left-1 px-1.5 py-0.5 text-[6px]' : 'top-4 left-4 px-3 py-1 text-[9px]'} rounded-full text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
