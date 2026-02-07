@@ -75,10 +75,10 @@
         box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
     }
 
-    /* Updated Terminal Container Styling */
+    /* Fixed Terminal Container Styling */
     .swap-column {
-        height: 720px; /* Increased height to fit full widgets */
-        min-height: 700px;
+        height: 850px; /* Increased height to accommodate DexHunter and Jupiter full UI */
+        min-height: 800px;
         width: 100%;
         border-radius: 2rem;
         overflow: hidden;
@@ -91,7 +91,11 @@
         flex-grow: 1;
         border: none;
     }
-    #integrated-terminal { width: 100%; height: 100%; }
+    #integrated-terminal { 
+        width: 100%; 
+        height: 100%; 
+        overflow: hidden;
+    }
   </style>
 </head>
 <body>
@@ -137,13 +141,18 @@
       useEffect(() => {
         if (activeTab === 'swap') {
           const initJup = () => {
-            if (window.Jupiter && document.getElementById('integrated-terminal')) {
+            const container = document.getElementById('integrated-terminal');
+            if (window.Jupiter && container) {
+              // Clear previous instances if they exist
+              container.innerHTML = '';
               window.Jupiter.init({
                 displayMode: "integrated",
                 integratedTargetId: "integrated-terminal",
                 endpoint: "https://api.mainnet-beta.solana.com",
                 strictTokenList: false,
-                containerStyles: { zIndex: 10 },
+                formProps: {
+                    fixedOutputMint: false,
+                },
               });
             } else {
               setTimeout(initJup, 500);
@@ -331,7 +340,6 @@
       return (
         <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
           
-          {/* Header & Navigation */}
           <div className="max-w-[1600px] mx-auto p-4 md:p-8 pt-12">
             <div className="flex flex-col items-center mb-8">
               <div className="relative group">
@@ -344,7 +352,6 @@
               </div>
             </div>
 
-            {/* Tab Selector */}
             <div className="flex justify-center mb-10">
                 <div className={`flex p-1 rounded-2xl border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 shadow-md'}`}>
                     <button 
@@ -364,7 +371,6 @@
 
             {activeTab === 'portfolio' ? (
                 <>
-                {/* Search & Control Panel */}
                 <div className={`max-w-6xl mx-auto p-6 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl border mb-6 glass-card ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-100'}`}>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12 mb-10">
                     <div className="space-y-4">
@@ -429,7 +435,6 @@
                   </div>
                 </div>
 
-                {/* Asset Display... */}
                 {nfts.length > 0 && (
                     <div className={`max-w-6xl mx-auto mb-8 p-6 rounded-3xl border flex flex-wrap items-center justify-between gap-6 transition-all ${darkMode ? 'bg-blue-500/10 border-blue-500/20' : 'bg-white border-slate-200'}`}>
                         <div className="flex gap-8">
@@ -544,7 +549,6 @@
                 </div>
                 </>
             ) : (
-                /* SWAP HUB WITH EXTENDED CONTAINER */
                 <div className="space-y-8 max-w-[1550px] mx-auto">
                     <div className="text-center">
                          <h2 className="text-4xl font-heading font-extrabold uppercase mb-2">Multi-Chain Swap Hub</h2>
@@ -587,6 +591,7 @@
                                 src="https://app.dexhunter.io/swap"
                                 title="DexHunter Cardano Swap"
                                 allow="clipboard-read; clipboard-write"
+                                className="w-full h-full"
                             ></iframe>
                         </div>
                     </div>
@@ -599,7 +604,7 @@
                 </div>
             )}
 
-            {/* Modals... */}
+            {/* Modals and Overlays */}
             {showManager && (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
                 <div className={`max-w-2xl w-full border rounded-[3rem] p-6 md:p-10 shadow-2xl flex flex-col max-h-[80vh] ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
