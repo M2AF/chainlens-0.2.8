@@ -39,20 +39,20 @@
     }
 
     .switch-bg {
-      width: 54px;
-      height: 28px;
+      width: 48px;
+      height: 24px;
       display: flex;
       align-items: center;
-      padding: 4px;
+      padding: 3px;
       cursor: pointer;
       transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .switch-dot {
-      width: 20px;
-      height: 20px;
+      width: 18px;
+      height: 18px;
       transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
     }
-    .translate-x-6 { transform: translateX(26px); }
+    .translate-x-6 { transform: translateX(24px); }
 
     .modal-enter { animation: fadeIn 0.3s ease-out; }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -184,22 +184,6 @@
       return (
         <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
           
-          <div className="fixed top-8 right-8 z-50 flex items-center space-x-3 bg-white/10 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-xl">
-            <span className="pl-2 text-[9px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-            <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-              <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
-            </div>
-          </div>
-
-          <div className="fixed top-8 left-8 z-50 flex items-center space-x-3 bg-white/10 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-xl">
-            <span className="pl-3 text-[9px] font-bold uppercase tracking-widest opacity-60 min-w-[70px]">
-              {isListView ? 'List View' : 'Grid View'}
-            </span>
-            <div onClick={() => setIsListView(!isListView)} className={`switch-bg rounded-full ${isListView ? 'bg-indigo-600' : 'bg-slate-300'}`}>
-              <div className={`switch-dot rounded-full bg-white shadow-lg ${isListView ? 'translate-x-6' : 'translate-x-0'}`} />
-            </div>
-          </div>
-
           <div className="max-w-6xl mx-auto p-8 pt-16">
             <div className="flex flex-col items-center mb-12">
               <img 
@@ -209,7 +193,8 @@
               />
             </div>
 
-            <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-20 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
+            {/* Input Dashboard Card */}
+            <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-6 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-10">
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
@@ -270,6 +255,28 @@
               </div>
             </div>
 
+            {/* Results Control Bar (Newly Requested Position) */}
+            <div className="flex justify-between items-center px-8 py-4 mb-8">
+                {/* Left Side: View Toggle (Green Circle Area) */}
+                <div className="flex items-center space-x-3">
+                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 min-w-[70px]">
+                        {isListView ? 'List View' : 'Grid View'}
+                    </span>
+                    <div onClick={() => setIsListView(!isListView)} className={`switch-bg rounded-full ${isListView ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                        <div className={`switch-dot rounded-full bg-white shadow-lg ${isListView ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </div>
+                </div>
+
+                {/* Right Side: Theme Toggle (Orange Circle Area) */}
+                <div className="flex items-center space-x-3">
+                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
+                    <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                        <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </div>
+                </div>
+            </div>
+
+            {/* Assets Area */}
             <div className={isListView ? "flex flex-col gap-4" : "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8"}>
               {nfts.map((nft, i) => (
                 <div key={i} 
