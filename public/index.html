@@ -72,6 +72,14 @@
     .scanning-glow {
         box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
     }
+
+    /* Swap Widget Styling */
+    .swap-container iframe {
+        border-radius: 24px;
+        min-height: 600px;
+        width: 100%;
+        border: none;
+    }
   </style>
 </head>
 <body>
@@ -81,6 +89,7 @@
     const { useState, useEffect, useMemo } = React;
 
     const App = () => {
+      const [activeTab, setActiveTab] = useState('portfolio'); // 'portfolio' or 'swap'
       const [evmAddr, setEvmAddr] = useState('');
       const [solAddr, setSolAddr] = useState('');
       const [adaAddr, setAdaAddr] = useState('');
@@ -93,9 +102,8 @@
       const [tokenMode, setTokenMode] = useState(false);
       const [isListView, setIsListView] = useState(false);
       
-      // New states for V2
       const [searchQuery, setSearchQuery] = useState('');
-      const [sortBy, setSortBy] = useState('value'); // 'value', 'name', 'chain'
+      const [sortBy, setSortBy] = useState('value'); 
 
       const [resolvedEvm, setResolvedEvm] = useState(null);
       const [isResolving, setIsResolving] = useState(false);
@@ -145,7 +153,6 @@
         }
       };
 
-      // V2 Logic: Filtered and Sorted Assets
       const visibleAssets = useMemo(() => {
         let filtered = nfts.filter(nft => {
           const rawId = nft.address || nft.id || nft.mint || nft.name;
@@ -293,220 +300,269 @@
       return (
         <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
           
+          {/* Header & Navigation */}
           <div className="max-w-6xl mx-auto p-4 md:p-8 pt-12">
-            <div className="flex flex-col items-center mb-12">
+            <div className="flex flex-col items-center mb-8">
               <div className="relative group">
                   <img 
                     src={darkMode ? "/ChainLens (dark).png" : "/ChainLens (light).png"} 
                     alt="ChainLens Logo" 
-                    className={`h-48 md:h-64 w-auto object-contain transition-transform duration-700 hover:scale-105 ${loading ? 'animate-pulse-slow' : ''}`} 
+                    className={`h-32 md:h-48 w-auto object-contain transition-transform duration-700 hover:scale-105 ${loading ? 'animate-pulse-slow' : ''}`} 
                   />
                   {loading && <div className="absolute inset-0 bg-blue-500/20 blur-3xl rounded-full -z-10 animate-pulse"></div>}
               </div>
             </div>
 
-            <div className={`p-6 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl border mb-6 glass-card ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-100'}`}>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12 mb-10">
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                      EVM Chains {resolvedEvm && <span className="text-emerald-500 ml-1">✓ RESOLVED</span>}
-                    </label>
-                    <button onClick={() => { setEvmAddr('0x01faF6DFc230d755141D84d7cB980dd68f5Efe13'); setResolvedEvm(null); }} className="text-[10px] font-bold text-blue-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
-                  </div>
-                  <div className="relative">
-                    <input type="text" value={evmAddr} onChange={e => { setEvmAddr(e.target.value); setResolvedEvm(null); }} placeholder="0x... or domain" className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200 focus:border-blue-400'}`} />
-                    {isResolving && <div className="absolute right-4 top-4 animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <ChainButton id="ethereum" /> <ChainButton id="polygon" /> <ChainButton id="base" /> <ChainButton id="abstract" /> <ChainButton id="monad" />
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
-                    <button onClick={() => setSolAddr('3noTuHnQdHkat2w5rBx18vAACMzFUvB5LodEe5vMN98d')} className="text-[10px] font-bold text-emerald-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
-                  </div>
-                  <input type="text" value={solAddr} onChange={e => setSolAddr(e.target.value)} placeholder="Address..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-400'}`} />
-                  <div className="flex flex-wrap gap-2">
-                    <ChainButton id="solana" />
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
-                    <button onClick={() => setAdaAddr('addr1q950qv0ks9t29mavulaa5jr3sk2s50r5jfsddydjs0pazrfh32tdpt7zttt4mhl6t9purm4c9rv555z7r5mulq78aleqcg9c9h')} className="text-[10px] font-bold text-cyan-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
-                  </div>
-                  <input type="text" value={adaAddr} onChange={e => setAdaAddr(e.target.value)} placeholder="$handle..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-cyan-500' : 'bg-slate-50 border-slate-200 focus:border-cyan-400'}`} />
-                  <div className="flex flex-wrap gap-2">
-                    <ChainButton id="cardano" />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex flex-col md:flex-row items-center gap-6">
-                <div className="flex items-center space-x-3 px-6 py-4 rounded-2xl border border-white/10 shadow-lg bg-black/5 min-w-[160px]">
-                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 w-12 text-center">{tokenMode ? 'Tokens' : 'NFTs'}</span>
-                  <div onClick={() => setTokenMode(!tokenMode)} className={`switch-bg rounded-full ${tokenMode ? 'bg-emerald-600' : 'bg-slate-300'}`}>
-                    <div className={`switch-dot rounded-full bg-white shadow-lg ${tokenMode ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </div>
-                </div>
-
-                <button onClick={handleSearch} disabled={loading} className={`flex-1 py-6 md:py-7 rounded-2xl font-sans font-bold text-2xl md:text-4xl uppercase tracking-widest transition-all active:scale-[0.98] ${loading ? 'opacity-50 cursor-not-allowed scanning-glow' : ''} ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
-                  {loading ? 'ANALYZING...' : 'SCAN ASSETS'}
-                </button>
-
-                <div className="flex gap-2">
-                    <button onClick={clearAll} className={`px-8 py-6 md:py-7 rounded-xl font-heading font-bold text-xs border-2 transition-all ${darkMode ? 'border-slate-800 text-slate-500 hover:text-red-500' : 'border-slate-200 text-slate-400 hover:text-red-500'}`}>
-                      CLEAR
+            {/* Tab Selector */}
+            <div className="flex justify-center mb-10">
+                <div className={`flex p-1 rounded-2xl border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 shadow-md'}`}>
+                    <button 
+                        onClick={() => setActiveTab('portfolio')}
+                        className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'portfolio' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}
+                    >
+                        Portfolio View
                     </button>
-                    <button onClick={resetEverything} title="Reset App Preferences" className={`px-4 py-6 md:py-7 rounded-xl font-heading font-bold text-xs border-2 transition-all ${darkMode ? 'border-red-900/30 text-red-900 hover:bg-red-900 hover:text-white' : 'border-red-100 text-red-200 hover:bg-red-500 hover:text-white'}`}>
-                      RESET
+                    <button 
+                        onClick={() => setActiveTab('swap')}
+                        className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'swap' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}
+                    >
+                        Swap Hub
                     </button>
                 </div>
-              </div>
             </div>
 
-            {/* V2 Portfolio Summary Bar */}
-            {nfts.length > 0 && (
-                <div className={`mb-8 p-6 rounded-3xl border flex flex-wrap items-center justify-between gap-6 transition-all ${darkMode ? 'bg-blue-500/10 border-blue-500/20' : 'bg-white border-slate-200'}`}>
-                    <div className="flex gap-8">
-                        <div>
-                            <p className="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-1">Total Value</p>
-                            <p className="text-3xl font-heading font-extrabold text-emerald-500">${totalPortfolioValue}</p>
-                        </div>
-                        <div>
-                            <p className="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-1">Assets Scanned</p>
-                            <p className="text-3xl font-heading font-extrabold">{visibleAssets.length}</p>
-                        </div>
-                    </div>
-                    
-                    <div className="flex flex-1 max-w-md gap-4">
-                         <div className="relative flex-1">
-                            <input 
-                                type="text" 
-                                placeholder="Filter results..." 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className={`w-full py-3 px-5 rounded-2xl border outline-none text-xs font-bold transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200'}`}
-                            />
-                         </div>
-                         <select 
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value)}
-                            className={`py-3 px-4 rounded-2xl border text-[10px] font-bold uppercase outline-none ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
-                         >
-                            <option value="value">Sort: Value</option>
-                            <option value="name">Sort: A-Z</option>
-                            <option value="chain">Sort: Chain</option>
-                         </select>
-                    </div>
-                </div>
-            )}
-
-            <div className="flex justify-between items-center px-4 md:px-8 py-4 mb-8">
-                <div className="flex items-center space-x-6">
-                    <div className="flex items-center space-x-3">
-                      <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 min-w-[70px]">
-                          {isListView ? 'List View' : 'Grid View'}
-                      </span>
-                      <div onClick={() => setIsListView(!isListView)} className={`switch-bg rounded-full ${isListView ? 'bg-indigo-600' : 'bg-slate-300'}`}>
-                          <div className={`switch-dot rounded-full bg-white shadow-lg ${isListView ? 'translate-x-6' : 'translate-x-0'}`} />
+            {activeTab === 'portfolio' ? (
+                <>
+                {/* Search & Control Panel */}
+                <div className={`p-6 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl border mb-6 glass-card ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-100'}`}>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12 mb-10">
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-end">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                          EVM Chains {resolvedEvm && <span className="text-emerald-500 ml-1">✓ RESOLVED</span>}
+                        </label>
+                        <button onClick={() => { setEvmAddr('0x01faF6DFc230d755141D84d7cB980dd68f5Efe13'); setResolvedEvm(null); }} className="text-[10px] font-bold text-blue-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
+                      </div>
+                      <div className="relative">
+                        <input type="text" value={evmAddr} onChange={e => { setEvmAddr(e.target.value); setResolvedEvm(null); }} placeholder="0x... or domain" className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200 focus:border-blue-400'}`} />
+                        {isResolving && <div className="absolute right-4 top-4 animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <ChainButton id="ethereum" /> <ChainButton id="polygon" /> <ChainButton id="base" /> <ChainButton id="abstract" /> <ChainButton id="monad" />
                       </div>
                     </div>
 
-                    <button 
-                      onClick={() => setShowManager(true)}
-                      className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${darkMode ? 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white' : 'bg-white border border-slate-200 text-slate-500'}`}
-                    >
-                      Hidden ({hiddenIds.length + spamIds.length})
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-end">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
+                        <button onClick={() => setSolAddr('3noTuHnQdHkat2w5rBx18vAACMzFUvB5LodEe5vMN98d')} className="text-[10px] font-bold text-emerald-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
+                      </div>
+                      <input type="text" value={solAddr} onChange={e => setSolAddr(e.target.value)} placeholder="Address..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-400'}`} />
+                      <div className="flex flex-wrap gap-2">
+                        <ChainButton id="solana" />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-end">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
+                        <button onClick={() => setAdaAddr('addr1q950qv0ks9t29mavulaa5jr3sk2s50r5jfsddydjs0pazrfh32tdpt7zttt4mhl6t9purm4c9rv555z7r5mulq78aleqcg9c9h')} className="text-[10px] font-bold text-cyan-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
+                      </div>
+                      <input type="text" value={adaAddr} onChange={e => setAdaAddr(e.target.value)} placeholder="$handle..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-cyan-500' : 'bg-slate-50 border-slate-200 focus:border-cyan-400'}`} />
+                      <div className="flex flex-wrap gap-2">
+                        <ChainButton id="cardano" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col md:flex-row items-center gap-6">
+                    <div className="flex items-center space-x-3 px-6 py-4 rounded-2xl border border-white/10 shadow-lg bg-black/5 min-w-[160px]">
+                      <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 w-12 text-center">{tokenMode ? 'Tokens' : 'NFTs'}</span>
+                      <div onClick={() => setTokenMode(!tokenMode)} className={`switch-bg rounded-full ${tokenMode ? 'bg-emerald-600' : 'bg-slate-300'}`}>
+                        <div className={`switch-dot rounded-full bg-white shadow-lg ${tokenMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </div>
+                    </div>
+
+                    <button onClick={handleSearch} disabled={loading} className={`flex-1 py-6 md:py-7 rounded-2xl font-sans font-bold text-2xl md:text-4xl uppercase tracking-widest transition-all active:scale-[0.98] ${loading ? 'opacity-50 cursor-not-allowed scanning-glow' : ''} ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
+                      {loading ? 'ANALYZING...' : 'SCAN ASSETS'}
                     </button>
+
+                    <div className="flex gap-2">
+                        <button onClick={clearAll} className={`px-8 py-6 md:py-7 rounded-xl font-heading font-bold text-xs border-2 transition-all ${darkMode ? 'border-slate-800 text-slate-500 hover:text-red-500' : 'border-slate-200 text-slate-400 hover:text-red-500'}`}>
+                          CLEAR
+                        </button>
+                        <button onClick={resetEverything} title="Reset App Preferences" className={`px-4 py-6 md:py-7 rounded-xl font-heading font-bold text-xs border-2 transition-all ${darkMode ? 'border-red-900/30 text-red-900 hover:bg-red-900 hover:text-white' : 'border-red-100 text-red-200 hover:bg-red-500 hover:text-white'}`}>
+                          RESET
+                        </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center space-x-3">
-                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-                    <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                        <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                {/* Portfolio Summary Bar */}
+                {nfts.length > 0 && (
+                    <div className={`mb-8 p-6 rounded-3xl border flex flex-wrap items-center justify-between gap-6 transition-all ${darkMode ? 'bg-blue-500/10 border-blue-500/20' : 'bg-white border-slate-200'}`}>
+                        <div className="flex gap-8">
+                            <div>
+                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-1">Total Value</p>
+                                <p className="text-3xl font-heading font-extrabold text-emerald-500">${totalPortfolioValue}</p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-1">Assets Scanned</p>
+                                <p className="text-3xl font-heading font-extrabold">{visibleAssets.length}</p>
+                            </div>
+                        </div>
+                        
+                        <div className="flex flex-1 max-w-md gap-4">
+                             <div className="relative flex-1">
+                                <input 
+                                    type="text" 
+                                    placeholder="Filter results..." 
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className={`w-full py-3 px-5 rounded-2xl border outline-none text-xs font-bold transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200'}`}
+                                />
+                             </div>
+                             <select 
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value)}
+                                className={`py-3 px-4 rounded-2xl border text-[10px] font-bold uppercase outline-none ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
+                             >
+                                <option value="value">Sort: Value</option>
+                                <option value="name">Sort: A-Z</option>
+                                <option value="chain">Sort: Chain</option>
+                             </select>
+                        </div>
+                    </div>
+                )}
+
+                {/* Display Controls */}
+                <div className="flex justify-between items-center px-4 md:px-8 py-4 mb-8">
+                    <div className="flex items-center space-x-6">
+                        <div className="flex items-center space-x-3">
+                          <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 min-w-[70px]">
+                              {isListView ? 'List View' : 'Grid View'}
+                          </span>
+                          <div onClick={() => setIsListView(!isListView)} className={`switch-bg rounded-full ${isListView ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                              <div className={`switch-dot rounded-full bg-white shadow-lg ${isListView ? 'translate-x-6' : 'translate-x-0'}`} />
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={() => setShowManager(true)}
+                          className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${darkMode ? 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white' : 'bg-white border border-slate-200 text-slate-500'}`}
+                        >
+                          Hidden ({hiddenIds.length + spamIds.length})
+                        </button>
+                    </div>
+
+                    <div className="flex items-center space-x-3">
+                        <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
+                        <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                            <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            {visibleAssets.length === 0 && !loading && nfts.length > 0 && (
-                <div className="text-center py-20 opacity-40">
-                    <p className="text-xl font-heading italic">No assets match your current filters.</p>
+                {visibleAssets.length === 0 && !loading && nfts.length > 0 && (
+                    <div className="text-center py-20 opacity-40">
+                        <p className="text-xl font-heading italic">No assets match your current filters.</p>
+                    </div>
+                )}
+
+                {/* Asset Grid/List */}
+                <div className={isListView ? "flex flex-col gap-3" : "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 md:gap-8"}>
+                  {visibleAssets.map((nft, i) => {
+                    const rawId = nft.address || nft.id || nft.mint || nft.name;
+                    const assetKey = `${nft.chain}-${String(rawId).toLowerCase()}`;
+                    
+                    return (
+                        <div key={assetKey} 
+                        onClick={() => setSelectedAsset(nft)} 
+                        className={`group relative overflow-hidden border transition-all cursor-pointer ${
+                          isListView 
+                          ? `flex items-center p-4 rounded-2xl ${darkMode ? 'bg-slate-900 border-slate-800 hover:border-slate-600' : 'bg-white border-slate-100 hover:shadow-lg hover:border-slate-300'}` 
+                          : `rounded-[2.5rem] shadow-sm flex flex-col ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 hover:-translate-y-2 hover:shadow-xl'}`
+                        }`}>
+                        
+                        <div className="absolute top-4 right-4 z-40 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                            <button 
+                            onClick={(e) => toggleHide(e, nft)}
+                            title="Hide Asset"
+                            className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/80 hover:bg-blue-500 text-white backdrop-blur-sm border border-white/10"
+                            >
+                            👁️
+                            </button>
+                            <button 
+                            onClick={(e) => toggleSpam(e, nft)}
+                            title="Mark as Spam"
+                            className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/80 hover:bg-red-600 text-white backdrop-blur-sm border border-white/10"
+                            >
+                            🚫
+                            </button>
+                        </div>
+
+                        <div className={isListView ? "w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 relative" : "aspect-square relative overflow-hidden bg-slate-100"}>
+                            <img src={nft.image || `https://via.placeholder.com/400/334155/ffffff?text=${nft.symbol || '?'}`} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+                            <div className={`absolute ${isListView ? 'top-1 left-1 px-1.5 py-0.5 text-[6px]' : 'top-4 left-4 px-3 py-1 text-[9px]'} rounded-full text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
+                            {nft.chain}
+                            </div>
+                        </div>
+
+                        <div className={isListView ? "flex-1 px-6 flex items-center justify-between overflow-hidden" : "p-5 text-center"}>
+                            <div className={isListView ? "flex flex-col min-w-0" : "flex flex-col items-center"}>
+                                <p className={`font-heading font-bold truncate uppercase tracking-tight shrink-0 ${isListView ? 'text-lg max-w-[300px]' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`}>
+                                    {nft.name}
+                                </p>
+                                {isListView && <span className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{nft.symbol || 'ASSET'}</span>}
+                            </div>
+
+                            {(nft.isToken || tokenMode) && (
+                            <div className={isListView ? "text-right flex flex-row items-center gap-8 shrink-0" : "mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
+                                <div className={isListView ? "flex flex-col items-end" : ""}>
+                                    <p className="text-emerald-500 font-bold text-lg leading-none">
+                                    {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
+                                    </p>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className={`font-bold uppercase tracking-tighter text-lg ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                                        {nft.nativePrice || '0.00'} {chainStyles[nft.chain]?.native || '???'}
+                                    </span>
+                                    <span className={`font-bold uppercase tracking-tighter text-lg opacity-70 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                        ${nft.totalValue || '0.00'}
+                                    </span>
+                                </div>
+                            </div>
+                            )}
+                        </div>
+                        </div>
+                    );
+                  })}
+                </div>
+                </>
+            ) : (
+                /* Swap Hub Tab with DexHunter Integration */
+                <div className={`p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl border glass-card swap-container ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-100'}`}>
+                    <div className="max-w-xl mx-auto">
+                        <div className="text-center mb-8">
+                            <h2 className="text-3xl font-heading font-extrabold uppercase mb-2">Multi-Chain Swap</h2>
+                            <p className="text-sm opacity-60">Execute swaps across Cardano and other networks via DexHunter Aggregator.</p>
+                        </div>
+                        
+                        {/* DexHunter Widget Iframe */}
+                        <iframe 
+                            src="https://app.dexhunter.io/swap?partnerId=YOUR_PARTNER_ID"
+                            title="DexHunter Swap"
+                            allow="clipboard-read; clipboard-write"
+                        ></iframe>
+                        
+                        <div className="mt-8 p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-center">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400">
+                                Protected by DexHunter Aggregator Protocol
+                            </p>
+                        </div>
+                    </div>
                 </div>
             )}
-
-            <div className={isListView ? "flex flex-col gap-3" : "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 md:gap-8"}>
-              {visibleAssets.map((nft, i) => {
-                const rawId = nft.address || nft.id || nft.mint || nft.name;
-                const assetKey = `${nft.chain}-${String(rawId).toLowerCase()}`;
-                
-                return (
-                    <div key={assetKey} 
-                    onClick={() => setSelectedAsset(nft)} 
-                    className={`group relative overflow-hidden border transition-all cursor-pointer ${
-                        isListView 
-                        ? `flex items-center p-4 rounded-2xl ${darkMode ? 'bg-slate-900 border-slate-800 hover:border-slate-600' : 'bg-white border-slate-100 hover:shadow-lg hover:border-slate-300'}` 
-                        : `rounded-[2.5rem] shadow-sm flex flex-col ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 hover:-translate-y-2 hover:shadow-xl'}`
-                    }`}>
-                    
-                    <div className="absolute top-4 right-4 z-40 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                        <button 
-                        onClick={(e) => toggleHide(e, nft)}
-                        title="Hide Asset"
-                        className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/80 hover:bg-blue-500 text-white backdrop-blur-sm border border-white/10"
-                        >
-                        👁️
-                        </button>
-                        <button 
-                        onClick={(e) => toggleSpam(e, nft)}
-                        title="Mark as Spam"
-                        className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/80 hover:bg-red-600 text-white backdrop-blur-sm border border-white/10"
-                        >
-                        🚫
-                        </button>
-                    </div>
-
-                    <div className={isListView ? "w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 relative" : "aspect-square relative overflow-hidden bg-slate-100"}>
-                        <img src={nft.image || `https://via.placeholder.com/400/334155/ffffff?text=${nft.symbol || '?'}`} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-                        <div className={`absolute ${isListView ? 'top-1 left-1 px-1.5 py-0.5 text-[6px]' : 'top-4 left-4 px-3 py-1 text-[9px]'} rounded-full text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>
-                        {nft.chain}
-                        </div>
-                    </div>
-
-                    <div className={isListView ? "flex-1 px-6 flex items-center justify-between overflow-hidden" : "p-5 text-center"}>
-                        <div className={isListView ? "flex flex-col min-w-0" : "flex flex-col items-center"}>
-                            <p className={`font-heading font-bold truncate uppercase tracking-tight shrink-0 ${isListView ? 'text-lg max-w-[300px]' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`}>
-                                {nft.name}
-                            </p>
-                            {isListView && <span className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{nft.symbol || 'ASSET'}</span>}
-                        </div>
-
-                        {(nft.isToken || tokenMode) && (
-                        <div className={isListView ? "text-right flex flex-row items-center gap-8 shrink-0" : "mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
-                            <div className={isListView ? "flex flex-col items-end" : ""}>
-                                <p className="text-emerald-500 font-bold text-lg leading-none">
-                                {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
-                                </p>
-                            </div>
-                            <div className="flex flex-col">
-                                <span className={`font-bold uppercase tracking-tighter text-lg ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-                                    {nft.nativePrice || '0.00'} {chainStyles[nft.chain]?.native || '???'}
-                                </span>
-                                <span className={`font-bold uppercase tracking-tighter text-lg opacity-70 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                    ${nft.totalValue || '0.00'}
-                                </span>
-                            </div>
-                        </div>
-                        )}
-                    </div>
-                    </div>
-                );
-              })}
-            </div>
 
             {/* Manager Modal */}
             {showManager && (
@@ -562,61 +618,43 @@
                 <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-6 md:p-12 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100'}`}>
                   <button onClick={() => setSelectedAsset(null)} className="absolute top-10 right-10 w-12 h-12 flex items-center justify-center rounded-full bg-slate-800 hover:bg-red-500 text-white transition-all font-bold">✕</button>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                    <div className="rounded-[2.5rem] overflow-hidden shadow-2xl bg-black/5 aspect-square relative">
-                        <img src={selectedAsset.image || `https://via.placeholder.com/600/334155/ffffff?text=${selectedAsset.symbol || '?'}`} className="w-full h-full object-contain" />
-                        <div className={`absolute top-6 left-6 px-4 py-1.5 rounded-full text-white text-[10px] font-bold uppercase tracking-widest backdrop-blur-md border border-white/20 shadow-lg ${chainStyles[selectedAsset.chain]?.color}`}>
-                          {selectedAsset.chain}
-                        </div>
+                    <div className="rounded-[2.5rem] overflow-hidden shadow-2xl">
+                       <img src={selectedAsset.image} className="w-full h-auto" />
                     </div>
-                    <div className="space-y-8">
-                      <div>
-                        <h2 className="text-4xl font-heading font-extrabold uppercase tracking-tighter leading-none">{selectedAsset.name}</h2>
-                        {(selectedAsset.isToken || tokenMode) && (
-                            <div className="mt-4 flex items-center gap-4">
-                                <span className="text-2xl font-bold text-emerald-500">{selectedAsset.balance} {selectedAsset.symbol}</span>
+                    <div>
+                       <div className={`inline-block px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest mb-4 ${chainStyles[selectedAsset.chain]?.color} text-white`}>{selectedAsset.chain}</div>
+                       <h1 className="text-4xl font-heading font-black uppercase mb-2 leading-none">{selectedAsset.name}</h1>
+                       <p className="text-sm font-bold opacity-40 uppercase tracking-widest mb-8">{selectedAsset.symbol || 'ASSET'}</p>
+                       
+                       {selectedAsset.isToken && (
+                         <div className="mb-8 grid grid-cols-2 gap-4">
+                            <div className="p-4 rounded-2xl bg-black/5 border border-white/5">
+                                <p className="text-[10px] font-bold uppercase opacity-40 mb-1">Quantity</p>
+                                <p className="text-2xl font-heading font-bold">{selectedAsset.balance}</p>
                             </div>
-                        )}
-                      </div>
+                            <div className="p-4 rounded-2xl bg-black/5 border border-white/5">
+                                <p className="text-[10px] font-bold uppercase opacity-40 mb-1">Value USD</p>
+                                <p className="text-2xl font-heading font-bold text-emerald-500">${selectedAsset.totalValue}</p>
+                            </div>
+                         </div>
+                       )}
 
-                      <div className="space-y-4">
-                        <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
-                            {(selectedAsset.isToken || tokenMode) ? 'Financial Overview' : 'On-Chain Metadata'}
-                        </label>
-                        
-                        <div className="grid grid-cols-2 gap-3">
-                          {(selectedAsset.isToken || tokenMode) ? (
-                            <>
-                                <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                    <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Native Price</p>
-                                    <p className="text-[13px] font-bold truncate mt-1">{selectedAsset.nativePrice} {chainStyles[selectedAsset.chain]?.native}</p>
-                                </div>
-                                <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                    <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">USD Valuation</p>
-                                    <p className="text-[13px] font-bold truncate mt-1">${selectedAsset.totalValue}</p>
-                                </div>
-                                <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                    <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Network</p>
-                                    <p className="text-[13px] font-bold truncate mt-1 uppercase">{selectedAsset.chain}</p>
-                                </div>
-                                <div className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                    <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Token Symbol</p>
-                                    <p className="text-[13px] font-bold truncate mt-1">{selectedAsset.symbol}</p>
-                                </div>
-                            </>
-                          ) : (
-                            (() => {
-                                const raw = selectedAsset.metadata?.traits || [];
-                                const normalized = Array.isArray(raw) ? raw : Object.entries(raw).map(([k, v]) => ({ trait_type: k, value: v }));
-                                return normalized.length > 0 ? normalized.map((t, idx) => (
-                                <div key={idx} className={`p-4 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                                    <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">{t.trait_type || t.key || 'Trait'}</p>
-                                    <p className="text-[13px] font-bold truncate mt-1">{String(t.value)}</p>
-                                </div>
-                                )) : <p className="text-sm italic opacity-40 col-span-2">No attributes found</p>;
-                            })()
-                          )}
-                        </div>
-                      </div>
+                       <div className="space-y-6">
+                          <div>
+                             <h3 className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-3">Attributes</h3>
+                             <div className="flex flex-wrap gap-2">
+                                {selectedAsset.metadata?.traits?.length > 0 ? selectedAsset.metadata.traits.map((t, i) => (
+                                  <div key={i} className="px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                                    <p className="text-[8px] uppercase opacity-60">{t.trait_type}</p>
+                                    <p className="text-[10px] font-bold">{t.value}</p>
+                                  </div>
+                                )) : <p className="text-xs italic opacity-30">No metadata found.</p>}
+                             </div>
+                          </div>
+                          <div className="pt-6 border-t border-white/10">
+                             <button onClick={() => setSelectedAsset(null)} className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold uppercase tracking-widest transition-all">Back to Gallery</button>
+                          </div>
+                       </div>
                     </div>
                   </div>
                 </div>

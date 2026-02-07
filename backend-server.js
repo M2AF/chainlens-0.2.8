@@ -15,7 +15,8 @@ const API_KEYS = {
   alchemy: process.env.ALCHEMY_KEY,
   blockfrost: process.env.BLOCKFROST_KEY,
   helius: process.env.HELIUS_KEY, 
-  unstoppable: process.env.UNSTOPPABLE_KEY
+  unstoppable: process.env.UNSTOPPABLE_KEY,
+  dexhunter: process.env.DEXHUNTER_PARTNER_ID // Added for Cardano Swaps
 };
 
 // --- Price Discovery Helper ---
@@ -48,12 +49,28 @@ app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// --- DexHunter Cardano Swap Integration ---
+// This endpoint allows your frontend to fetch swap quotes via your partner ID
+app.get('/api/swap/cardano/quote', async (req, res) => {
+  const { fromToken, toToken, amount } = req.query;
+  try {
+    const response = await fetch(`https://api.dexhunter.io/v1/swap/quote?from=${fromToken}&to=${toToken}&amount=${amount}`, {
+      headers: { 
+        'X-Partner-Id': API_KEYS.dexhunter,
+        'Accept': 'application/json' 
+      }
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch swap quote" });
+  }
+});
+
 // --- EVM NFT Helper ---
 const fetchAlchemyNFTs = async (network, address, chainId) => {
   try {
-    // Standardize to NFT API v3 for all chains, including Abstract and Monad
     const url = `https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`;
-
     const res = await fetch(url);
     const data = await res.json();
     
@@ -103,7 +120,7 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
       nativePriceAddr = '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270';
     } else if (chainId === 'abstract') {
       nativeSymbol = 'ABS'; nativeName = 'Abstract'; nativeLogo = 'https://cryptologos.cc/logos/abstract-abs-logo.png';
-      nativePriceAddr = '0x0000000000000000000000000000000000000000'; // Native
+      nativePriceAddr = '0x0000000000000000000000000000000000000000';
     }
 
     const nativeUsdPrice = await fetchUSDPrice(chainId, nativePriceAddr);
