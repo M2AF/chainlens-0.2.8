@@ -5,7 +5,6 @@ const fetch = require('node-fetch');
 const path = require('path');
 
 const app = express();
-// Bind to process.env.PORT for Render, default to 10000
 const PORT = process.env.PORT || 10000; 
 
 app.use(cors());
@@ -17,6 +16,26 @@ const API_KEYS = {
   blockfrost: process.env.BLOCKFROST_KEY,
   helius: process.env.HELIUS_KEY, 
   unstoppable: process.env.UNSTOPPABLE_KEY
+};
+
+// --- NEW: Price Discovery Helper (DexScreener) ---
+const fetchUSDPrice = async (chainId, address) => {
+  try {
+    // Mapping internal IDs to DexScreener chain names
+    const chainMap = { 
+      'ethereum': 'ethereum', 'base': 'base', 'polygon': 'polygon', 
+      'abstract': 'abstract', 'monad': 'monad', 'solana': 'solana', 'cardano': 'cardano' 
+    };
+    const dsChain = chainMap[chainId] || chainId;
+    
+    // DexScreener free API for token profiles/prices
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
+    const data = await res.json();
+    
+    // Find the pair with the most liquidity or just the first valid one
+    const pair = data.pairs?.find(p => p.chainId === dsChain) || data.pairs?.[0];
+    return pair ? parseFloat(pair.priceUsd) : 0;
+  } catch (e) { return 0; }
 };
 
 // --- Unstoppable Domains Resolution ---
@@ -76,23 +95,28 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
       const nativeBalance = rawNative / 1e18;
       
       if (nativeBalance > 0.0001) {
-        let symbol = 'ETH'; 
-        let name = 'Ether';
-        let logo = 'https://cryptologos.cc/logos/ethereum-eth-logo.png';
+        let symbol = 'ETH', name = 'Ether', logo = 'https://cryptologos.cc/logos/ethereum-eth-logo.png';
+        let nativeAddr = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'; // WETH for pricing
 
         if (chainId === 'monad') { 
-          symbol = 'MON'; 
-          name = 'Monad'; 
+          symbol = 'MON'; name = 'Monad'; 
           logo = 'https://pbs.twimg.com/profile_images/1691568696803713024/Sw_hQ2yT_400x400.jpg';
         }
-        if (chainId === 'abstract') { symbol = 'ETH'; name = 'Abstract ETH'; }
-        if (chainId === 'polygon') { symbol = 'MATIC'; name = 'Polygon'; logo = 'https://cryptologos.cc/logos/polygon-matic-logo.png'; }
+        if (chainId === 'polygon') { 
+            symbol = 'MATIC'; name = 'Polygon'; 
+            logo = 'https://cryptologos.cc/logos/polygon-matic-logo.png';
+            nativeAddr = '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270';
+        }
+
+        const usdPrice = await fetchUSDPrice(chainId, nativeAddr);
 
         tokens.push({
           id: 'native',
           name: name,
           symbol: symbol,
-          balance: nativeBalance.toLocaleString(undefined, { maximumFractionDigits: 4 }),
+          balance: nativeBalance.toFixed(4),
+          usdPrice: usdPrice,
+          totalValue: (nativeBalance * usdPrice).toFixed(2),
           image: logo,
           chain: chainId,
           isToken: true
@@ -101,7 +125,7 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
     }
 
     const balances = erc20Res.result?.tokenBalances || [];
-    const nonZero = balances.filter(t => parseInt(t.tokenBalance, 16) > 0);
+    const nonZero = balances.filter(t => parseInt(t.tokenBalance, 16) > 0).slice(0, 15); // Limit for performance
 
     const erc20Tasks = nonZero.map(async (token) => {
       try {
@@ -116,11 +140,15 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
         
         if (balance < 0.000001) return null;
 
+        const usdPrice = await fetchUSDPrice(chainId, token.contractAddress);
+
         return {
           id: token.contractAddress,
           name: metadata.name || 'Unknown',
           symbol: metadata.symbol || '???',
-          balance: balance.toLocaleString(undefined, { maximumFractionDigits: 4 }),
+          balance: balance.toFixed(4),
+          usdPrice: usdPrice,
+          totalValue: (balance * usdPrice).toFixed(2),
           image: metadata.logo || `https://via.placeholder.com/400/334155/ffffff?text=${metadata.symbol || '$'}`,
           chain: chainId,
           isToken: true
@@ -147,7 +175,7 @@ evmChains.forEach(chain => {
   app.get(`/api/tokens/${chain.id}/:address`, (req, res) => fetchAlchemyTokens(chain.net, req.params.address, chain.id).then(t => res.json({ nfts: t })));
 });
 
-// --- Solana (With Price Integration) ---
+// --- Solana ---
 app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
   const { mode, address } = req.params;
   try {
@@ -156,15 +184,7 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0', id: 'sol-scan', method: 'getAssetsByOwner',
-        params: { 
-          ownerAddress: address, 
-          page: 1, 
-          limit: 100, 
-          displayOptions: { 
-            showFungible: mode === 'tokens', 
-            showNativeBalance: mode === 'tokens' 
-          } 
-        }
+        params: { ownerAddress: address, page: 1, limit: 100, displayOptions: { showFungible: mode === 'tokens', showNativeBalance: mode === 'tokens' } }
       })
     });
     const data = await response.json();
@@ -222,13 +242,16 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
     const assetsRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/accounts/${addrData.stake_address}/addresses/assets`, { headers: { project_id: API_KEYS.blockfrost } });
     const assets = await assetsRes.json();
 
-    const tasks = assets.slice(0, 50).map(async (a) => {
+    const tasks = assets.slice(0, 30).map(async (a) => {
       const metaRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/assets/${a.unit}`, { headers: { project_id: API_KEYS.blockfrost } });
       const meta = await metaRes.json();
       const isNFT = parseInt(a.quantity) === 1;
       
       if (mode === 'tokens' && isNFT) return null;
       if (mode === 'nfts' && !isNFT) return null;
+
+      const usdPrice = await fetchUSDPrice('cardano', a.unit);
+      const balance = (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0));
 
       let img = meta.onchain_metadata?.image || '';
       if (Array.isArray(img)) img = img.join('');
@@ -239,7 +262,9 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
         name: meta.onchain_metadata?.name || meta.asset_name || 'Cardano Asset',
         chain: 'cardano',
         image: imageUrl || 'https://via.placeholder.com/400/0033AD/ffffff?text=ADA',
-        balance: mode === 'tokens' ? (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0)).toFixed(2) : null,
+        balance: mode === 'tokens' ? balance.toFixed(2) : null,
+        usdPrice: usdPrice,
+        totalValue: (balance * usdPrice).toFixed(2),
         symbol: meta.metadata?.ticker || '',
         isToken: mode === 'tokens',
         metadata: { traits: meta.onchain_metadata?.attributes || [], description: meta.onchain_metadata?.description || '' }
