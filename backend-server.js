@@ -23,17 +23,25 @@ app.get('/api/resolve/unstoppable/:domain', async (req, res) => {
   const { domain } = req.params;
   try {
     const response = await fetch(`https://api.unstoppabledomains.com/resolve/domains/${domain}`, {
-      headers: { 'Authorization': `Bearer ${API_KEYS.unstoppable}`, 'Accept': 'application/json' }
+      headers: { 
+        'Authorization': `Bearer ${API_KEYS.unstoppable}`,
+        'Accept': 'application/json'
+      }
     });
+    
     if (!response.ok) return res.status(404).json({ error: 'Domain not found.' });
+    
     const data = await response.json();
     const address = data.records?.['crypto.ETH.address'] || data.meta?.owner;
+    
     if (address) res.json({ address });
     else res.status(404).json({ error: 'No EVM address linked.' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// --- EVM NFT Helper ---
+// --- Alchemy EVM Helper ---
 const fetchAlchemy = async (network, address, chainId) => {
   try {
     const res = await fetch(`https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`);
@@ -49,64 +57,108 @@ const fetchAlchemy = async (network, address, chainId) => {
   } catch (e) { return []; }
 };
 
-// --- EVM Token Helper (New Addition) ---
-const fetchAlchemyTokens = async (network, address, chainId) => {
-  try {
-    const res = await fetch(`https://${network}.g.alchemy.com/data/v1/${API_KEYS.alchemy}/tokens/by-address`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        addresses: [{ address, network: network.replace('-mainnet', '') }],
-        withPrices: true 
-      })
-    });
-    const data = await res.json();
-    const tokens = data.data?.[0]?.tokens || [];
-    return tokens.map(t => ({
-      id: `${chainId}-${t.tokenAddress || 'native'}`,
-      name: t.tokenMetadata?.name || 'Unknown Token',
-      symbol: t.tokenMetadata?.symbol || '',
-      logo: t.tokenMetadata?.logo || '',
-      balance: parseFloat(t.tokenBalance) / Math.pow(10, t.tokenMetadata?.decimals || 18),
-      priceUsd: parseFloat(t.tokenPrices?.[0]?.value || 0),
-      chain: chainId,
-      type: 'token'
-    })).filter(t => t.balance > 0);
-  } catch (e) { return []; }
-};
+// --- EVM API ROUTES ---
+app.get('/api/nfts/ethereum/:address', (req, res) => fetchAlchemy('eth-mainnet', req.params.address, 'ethereum').then(n => res.json({ nfts: n })));
+app.get('/api/nfts/abstract/:address', (req, res) => fetchAlchemy('abstract-mainnet', req.params.address, 'abstract').then(n => res.json({ nfts: n })));
+app.get('/api/nfts/monad/:address', (req, res) => fetchAlchemy('monad-testnet', req.params.address, 'monad').then(n => res.json({ nfts: n })));
+app.get('/api/nfts/base/:address', (req, res) => fetchAlchemy('base-mainnet', req.params.address, 'base').then(n => res.json({ nfts: n })));
+app.get('/api/nfts/polygon/:address', (req, res) => fetchAlchemy('polygon-mainnet', req.params.address, 'polygon').then(n => res.json({ nfts: n })));
 
-// --- API ROUTES ---
-app.get('/api/nfts/:chain/:address', (req, res) => fetchAlchemy(`${req.params.chain}-mainnet`, req.params.address, req.params.chain).then(n => res.json({ nfts: n })));
-app.get('/api/tokens/:chain/:address', (req, res) => fetchAlchemyTokens(`${req.params.chain}-mainnet`, req.params.address, req.params.chain).then(t => res.json({ tokens: t })));
-
-// Solana Route (Supports both)
-app.get('/api/:mode/solana/:address', async (req, res) => {
-  const isToken = req.params.mode === 'tokens';
+// --- SOLANA ROUTE ---
+app.get('/api/nfts/solana/:address', async (req, res) => {
   try {
     const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        jsonrpc: '2.0', id: 'helius', method: 'searchAssets',
-        params: { 
-          ownerAddress: req.params.address, 
-          tokenType: isToken ? 'fungible' : 'nonFungible',
-          displayOptions: { showFungible: isToken, showCollectionMetadata: !isToken } 
-        }
+        jsonrpc: '2.0',
+        id: 'my-id',
+        method: 'getAssetsByOwner',
+        params: { ownerAddress: req.params.address, page: 1, limit: 100, displayOptions: { showCollectionMetadata: true } }
       })
     });
     const data = await response.json();
     const items = data.result?.items || [];
-    const results = items.map(item => isToken ? ({
-      id: item.id, name: item.content?.metadata?.name || 'Token', symbol: item.content?.metadata?.symbol,
-      logo: item.content?.links?.image, balance: item.token_info?.balance / Math.pow(10, item.token_info?.decimals || 0),
-      priceUsd: item.token_info?.price_info?.price_per_token || 0, chain: 'solana', type: 'token'
-    }) : ({
-      id: item.id, name: item.content?.metadata?.name || 'Solana NFT', chain: 'solana',
-      image: item.content?.links?.image || '', collection: item.grouping?.[0]?.collection_metadata?.name || 'Solana',
-      metadata: { traits: item.content?.metadata?.attributes || [], description: item.content?.metadata?.description || '' }
+    const nfts = items.map(asset => ({
+      id: asset.id,
+      name: asset.content?.metadata?.name || 'Solana NFT',
+      chain: 'solana',
+      image: asset.content?.links?.image || '',
+      collection: asset.grouping?.[0]?.collection_metadata?.name || 'Solana',
+      metadata: { traits: asset.content?.metadata?.attributes || [], description: asset.content?.metadata?.description || '' }
     }));
-    res.json({ [isToken ? 'tokens' : 'nfts']: results });
+    res.json({ nfts });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- UPDATED CARDANO ROUTE (Supports both nfts and tokens) ---
+app.get('/api/:mode/cardano/:address', async (req, res) => {
+  const { mode, address } = req.params;
+  const isTokenMode = mode === 'tokens';
+
+  try {
+    let targetAddress = address;
+    
+    // Handle $handle resolution
+    if (targetAddress.startsWith('$')) {
+      const handleName = targetAddress.replace('$', '').toLowerCase();
+      const handleRes = await fetch(`https://api.handle.me/handles/${handleName}`);
+      if (handleRes.ok) {
+        const handleData = await handleRes.json();
+        if (handleData.resolved_addresses?.ada) targetAddress = handleData.resolved_addresses.ada;
+      }
+    }
+
+    // Get Stake Address
+    const addrInfoRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${targetAddress}`, { 
+      headers: { project_id: API_KEYS.blockfrost } 
+    });
+    const addrInfo = await addrInfoRes.json();
+    const stakeAddress = addrInfo.stake_address;
+    if (!stakeAddress) return res.json({ [mode]: [] });
+
+    // Get All Assets associated with the account
+    const assetsRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/accounts/${stakeAddress}/addresses/assets`, { 
+      headers: { project_id: API_KEYS.blockfrost } 
+    });
+    const assets = await assetsRes.json();
+
+    if (isTokenMode) {
+      // Logic for Fungible Tokens (Quantity > 1 or specific policy types)
+      // Note: ADA is usually handled separately as a balance, but here we map assets
+      const tokens = assets.map(asset => ({
+        id: asset.unit,
+        name: 'Cardano Asset',
+        symbol: 'ADA-ASSET',
+        balance: parseInt(asset.quantity) / 1000000,
+        priceUsd: 0, // Requires additional price feed API
+        chain: 'cardano'
+      }));
+      return res.json({ tokens });
+    } else {
+      // Logic for NFTs (Original logic: quantity === 1)
+      const nftTasks = assets.filter(a => parseInt(a.quantity) === 1).slice(0, 50).map(async (asset) => {
+        try {
+          const metaRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/assets/${asset.unit}`, { headers: { project_id: API_KEYS.blockfrost } });
+          const meta = await metaRes.json();
+          let img = meta.onchain_metadata?.image || '';
+          if (Array.isArray(img)) img = img.join('');
+          let imageUrl = img ? (img.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}` : (img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`)) : '';
+          
+          return {
+            id: asset.unit,
+            name: meta.onchain_metadata?.name || meta.asset_name || 'Cardano NFT',
+            chain: 'cardano',
+            image: imageUrl || 'https://via.placeholder.com/400/06b6d4/ffffff?text=Cardano+NFT',
+            collection: meta.onchain_metadata?.collection || meta.policy_id?.substring(0, 8) || 'Cardano',
+            metadata: { traits: meta.onchain_metadata?.attributes || [], description: meta.onchain_metadata?.description || '' }
+          };
+        } catch (err) { return null; }
+      });
+
+      const results = await Promise.all(nftTasks);
+      res.json({ nfts: results.filter(n => n !== null) });
+    }
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
