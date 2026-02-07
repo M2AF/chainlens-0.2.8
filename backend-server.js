@@ -5,7 +5,7 @@ const fetch = require('node-fetch');
 const path = require('path');
 
 const app = express();
-// FIX: Bind to process.env.PORT for Render, default to 10000
+// Bind to process.env.PORT for Render, default to 10000
 const PORT = process.env.PORT || 10000; 
 
 app.use(cors());
@@ -147,7 +147,7 @@ evmChains.forEach(chain => {
   app.get(`/api/tokens/${chain.id}/:address`, (req, res) => fetchAlchemyTokens(chain.net, req.params.address, chain.id).then(t => res.json({ nfts: t })));
 });
 
-// --- Solana ---
+// --- Solana (With Price Integration) ---
 app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
   const { mode, address } = req.params;
   try {
@@ -156,22 +156,37 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0', id: 'sol-scan', method: 'getAssetsByOwner',
-        params: { ownerAddress: address, page: 1, limit: 100, displayOptions: { showFungible: mode === 'tokens', showNativeBalance: mode === 'tokens' } }
+        params: { 
+          ownerAddress: address, 
+          page: 1, 
+          limit: 100, 
+          displayOptions: { 
+            showFungible: mode === 'tokens', 
+            showNativeBalance: mode === 'tokens' 
+          } 
+        }
       })
     });
     const data = await response.json();
     const items = data.result?.items || [];
 
     if (mode === 'tokens') {
-      const tokens = items.filter(i => i.interface === 'FungibleToken' || i.interface === 'FungibleAsset').map(t => ({
-        id: t.id,
-        name: t.content?.metadata?.name || 'Solana Token',
-        symbol: t.content?.metadata?.symbol || 'SOL',
-        balance: (t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0)).toFixed(4),
-        image: t.content?.links?.image || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
-        chain: 'solana',
-        isToken: true
-      }));
+      const tokens = items.filter(i => i.interface === 'FungibleToken' || i.interface === 'FungibleAsset').map(t => {
+        const balanceNum = (t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0));
+        const usdPrice = t.token_info?.price_info?.price_per_token || 0;
+        
+        return {
+          id: t.id,
+          name: t.content?.metadata?.name || 'Solana Token',
+          symbol: t.content?.metadata?.symbol || 'SOL',
+          balance: balanceNum.toFixed(4),
+          usdPrice: usdPrice,
+          totalValue: (balanceNum * usdPrice).toFixed(2),
+          image: t.content?.links?.image || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+          chain: 'solana',
+          isToken: true
+        };
+      });
       res.json({ nfts: tokens.filter(t => parseFloat(t.balance) > 0) });
     } else {
       const nfts = items.filter(i => i.interface !== 'FungibleToken' && i.interface !== 'FungibleAsset').map(asset => ({

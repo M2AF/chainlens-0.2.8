@@ -309,10 +309,19 @@
                     </div>
 
                     {nft.isToken && (
-                      <div className={isListView ? "text-right" : "mt-1"}>
+                      <div className={isListView ? "text-right flex flex-col items-end" : "mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
                         <p className="text-emerald-500 font-bold text-lg leading-none">
                           {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
                         </p>
+                        
+                        <div className="flex flex-col mt-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                            Price: ${nft.usdPrice || '0.00'}
+                          </span>
+                          <span className={`font-bold ${darkMode ? 'text-white' : 'text-slate-900'} ${isListView ? 'text-xl' : 'text-sm'}`}>
+                            Total: ${nft.totalValue || '0.00'}
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>
