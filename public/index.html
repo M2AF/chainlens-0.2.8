@@ -69,18 +69,10 @@
     const { useState, useEffect } = React;
 
     const App = () => {
-      // Configuration & Defaults
-      const DEFAULTS = {
-        evm: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-        sol: '78b5fS8UMrs9z78bmXvSshYv2cqN6ksf226v5SbcSbc6',
-        ada: '$handle',
-        chains: ['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']
-      };
-
-      const [evmAddr, setEvmAddr] = useState(DEFAULTS.evm);
-      const [solAddr, setSolAddr] = useState(DEFAULTS.sol);
-      const [adaAddr, setAdaAddr] = useState(DEFAULTS.ada);
-      const [activeChains, setActiveChains] = useState(DEFAULTS.chains);
+      const [evmAddr, setEvmAddr] = useState('');
+      const [solAddr, setSolAddr] = useState('');
+      const [adaAddr, setAdaAddr] = useState('');
+      const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']);
       
       const [nfts, setNfts] = useState([]);
       const [loading, setLoading] = useState(false);
@@ -102,7 +94,6 @@
         abstract: { color: 'bg-[#00FF85] text-black', label: 'Abstract', native: 'ETH' }
       };
 
-      // Lifecycle for Theme
       useEffect(() => {
         const savedMode = localStorage.getItem('darkMode');
         if (savedMode === 'true') setDarkMode(true);
@@ -112,17 +103,9 @@
         localStorage.setItem('darkMode', darkMode);
       }, [darkMode]);
 
-      // Actions
       const clearAll = () => {
         setEvmAddr(''); setSolAddr(''); setAdaAddr('');
         setNfts([]); setResolvedEvm(null);
-      };
-
-      const restoreDefaults = () => {
-        setEvmAddr(DEFAULTS.evm);
-        setSolAddr(DEFAULTS.sol);
-        setAdaAddr(DEFAULTS.ada);
-        setActiveChains(DEFAULTS.chains);
       };
 
       const handleSearch = async () => {
@@ -132,7 +115,6 @@
         
         let targetEvm = evmAddr.trim();
 
-        // 1. Handle Domain/ENS/Unstoppable Resolution
         if (targetEvm.includes('.')) {
           setIsResolving(true);
           try {
@@ -146,7 +128,6 @@
           setIsResolving(false);
         }
 
-        // 2. Prepare Parallel Fetching
         const tasks = [];
         const modePath = tokenMode ? 'tokens' : 'nfts';
 
@@ -164,7 +145,6 @@
           tasks.push(fetch(`/api/${modePath}/cardano/${adaAddr.trim()}`).then(r => r.json()));
         }
 
-        // 3. Process & Filter Results
         try {
           const results = await Promise.allSettled(tasks);
           const combined = results
@@ -204,7 +184,6 @@
       return (
         <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
           
-          {/* Settings Overlay Controls */}
           <div className="fixed top-8 right-8 z-50 flex items-center space-x-3 bg-white/10 backdrop-blur-md p-2 rounded-full border border-white/10 shadow-xl">
             <span className="pl-2 text-[9px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
             <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
@@ -230,10 +209,8 @@
               />
             </div>
 
-            {/* Input Hub */}
             <div className={`p-12 rounded-[3.5rem] shadow-2xl border mb-20 ${darkMode ? 'bg-slate-900/40 border-slate-800 backdrop-blur-xl' : 'bg-white border-slate-100'}`}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-10">
-                {/* EVM Address */}
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
@@ -250,7 +227,6 @@
                   </div>
                 </div>
 
-                {/* Solana Address */}
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Solana Network</label>
@@ -262,7 +238,6 @@
                   </div>
                 </div>
 
-                {/* Cardano Address */}
                 <div className="space-y-4">
                   <div className="flex justify-between items-end">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cardano Ledger</label>
@@ -275,7 +250,6 @@
                 </div>
               </div>
               
-              {/* Primary Action Row */}
               <div className="flex flex-col md:flex-row items-center gap-6">
                 <div className="flex items-center space-x-3 px-6 py-4 rounded-2xl border border-white/10 shadow-lg bg-black/5 min-w-[160px]">
                   <span className="text-[10px] font-bold uppercase tracking-widest opacity-60 w-12 text-center">{tokenMode ? 'Tokens' : 'NFTs'}</span>
@@ -288,18 +262,14 @@
                   {loading ? 'ANALYZING...' : 'SCAN ASSETS'}
                 </button>
 
-                <div className="flex flex-col gap-2">
-                    <button onClick={clearAll} className={`px-10 py-3 rounded-xl font-heading font-bold text-sm border-2 transition-all ${darkMode ? 'border-slate-800 text-slate-500 hover:text-red-500' : 'border-slate-200 text-slate-400 hover:text-red-500'}`}>
+                <div className="flex flex-col">
+                    <button onClick={clearAll} className={`px-12 py-7 rounded-xl font-heading font-bold text-sm border-2 transition-all ${darkMode ? 'border-slate-800 text-slate-500 hover:text-red-500' : 'border-slate-200 text-slate-400 hover:text-red-500'}`}>
                     CLEAR
-                    </button>
-                    <button onClick={restoreDefaults} className={`px-10 py-3 rounded-xl font-heading font-bold text-sm border-2 transition-all ${darkMode ? 'border-slate-800 text-slate-500 hover:text-blue-500' : 'border-slate-200 text-slate-400 hover:text-blue-500'}`}>
-                    RESET
                     </button>
                 </div>
               </div>
             </div>
 
-            {/* Asset Gallery */}
             <div className={isListView ? "flex flex-col gap-4" : "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-8"}>
               {nfts.map((nft, i) => (
                 <div key={i} 
@@ -344,7 +314,6 @@
               ))}
             </div>
 
-            {/* NFT Details Modal */}
             {selectedNft && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
                 <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-12 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100'}`}>
