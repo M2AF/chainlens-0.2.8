@@ -120,6 +120,11 @@
       const [spamIds, setSpamIds] = useState(() => JSON.parse(localStorage.getItem('spamAssets') || '[]'));
       const [showManager, setShowManager] = useState(false);
 
+      // CoinGecko States
+      const [marketData, setMarketData] = useState([]);
+      const [marketLoading, setMarketLoading] = useState(false);
+      const [marketSearch, setMarketSearch] = useState('');
+
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
         polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon', native: 'POL' },
@@ -143,6 +148,29 @@
         localStorage.setItem('hiddenAssets', JSON.stringify(hiddenIds));
         localStorage.setItem('spamAssets', JSON.stringify(spamIds));
       }, [hiddenIds, spamIds]);
+
+      // Fetch CoinGecko Market Data
+      useEffect(() => {
+        const fetchMarket = async () => {
+          setMarketLoading(true);
+          try {
+            const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=true&price_change_percentage=24h');
+            const data = await res.json();
+            setMarketData(data);
+          } catch (e) { console.error("Market fetch failed", e); }
+          setMarketLoading(false);
+        };
+        fetchMarket();
+        const interval = setInterval(fetchMarket, 60000); // Refresh every minute
+        return () => clearInterval(interval);
+      }, []);
+
+      const filteredMarket = useMemo(() => {
+        return marketData.filter(coin => 
+          coin.name.toLowerCase().includes(marketSearch.toLowerCase()) || 
+          coin.symbol.toLowerCase().includes(marketSearch.toLowerCase())
+        );
+      }, [marketData, marketSearch]);
 
       const clearAll = () => {
         setEvmAddr(''); setSolAddr(''); setAdaAddr('');
@@ -333,7 +361,6 @@
               </div>
             </div>
 
-            {/* HEADER NAVIGATION: Moved Dark Mode Switch here */}
             <div className="flex flex-col md:flex-row items-center justify-center gap-6 mb-10">
                 <div className={`flex p-1 rounded-2xl border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 shadow-md'}`}>
                     <button 
@@ -548,7 +575,7 @@
                                 </div>
                             </div>
                             <iframe 
-                                src="https://app.uniswap.org/#/swap?use=v3" 
+                                src={`https://app.uniswap.org/#/swap?use=v3&theme=${darkMode ? 'dark' : 'light'}`} 
                                 title="EVM Swap"
                             ></iframe>
                         </div>
@@ -559,7 +586,7 @@
                                 <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
                             </div>
                             <iframe 
-                                src="https://jup.ag/swap" 
+                                src={`https://jup.ag/swap?theme=${darkMode ? 'dark' : 'light'}`} 
                                 title="Jupiter Swap"
                                 allow="clipboard-write"
                             ></iframe>
@@ -571,7 +598,7 @@
                                 <div className="w-2 h-2 rounded-full bg-cyan-500"></div>
                             </div>
                             <iframe 
-                                src="https://app.dexhunter.io/swap"
+                                src={`https://app.dexhunter.io/swap?theme=${darkMode ? 'dark' : 'light'}`}
                                 title="DexHunter Cardano Swap"
                                 allow="clipboard-read; clipboard-write"
                                 className="w-full h-full"
@@ -579,15 +606,78 @@
                         </div>
                     </div>
 
-                    <div className="max-w-xl mx-auto p-4 rounded-3xl bg-blue-500/10 border border-blue-500/20 text-center">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400">
-                            Aggregation provided by Uniswap, Jupiter, and DexHunter Protocols
-                        </p>
+                    {/* COINGECKO MARKET SECTION */}
+                    <div className={`mt-12 p-8 rounded-[3rem] border transition-all ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-2xl'}`}>
+                        <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-6">
+                            <div className="flex items-center gap-4">
+                                <h3 className="text-2xl font-heading font-extrabold uppercase shrink-0">Market Watch</h3>
+                                <div className="relative">
+                                    <input 
+                                        type="text" 
+                                        placeholder="Search coins..." 
+                                        value={marketSearch}
+                                        onChange={(e) => setMarketSearch(e.target.value)}
+                                        className={`py-2 px-4 rounded-xl border text-[10px] font-bold uppercase outline-none transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200'}`}
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Data Provider</span>
+                                <img src="https://static.coingecko.com/s/coingecko-logo-d13d6bcceddbdc1343911c3003394124967930728e2f6931cca9e95fe773391d.png" className="h-4 grayscale opacity-50" />
+                            </div>
+                        </div>
+
+                        {marketLoading && marketData.length === 0 ? (
+                            <div className="py-20 text-center animate-pulse">
+                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">Fetching global markets...</p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="border-b border-white/5">
+                                            <th className="pb-4 text-[10px] font-bold uppercase tracking-widest opacity-40 px-2">#</th>
+                                            <th className="pb-4 text-[10px] font-bold uppercase tracking-widest opacity-40">Asset</th>
+                                            <th className="pb-4 text-[10px] font-bold uppercase tracking-widest opacity-40 text-right">Price</th>
+                                            <th className="pb-4 text-[10px] font-bold uppercase tracking-widest opacity-40 text-right">24h</th>
+                                            <th className="pb-4 text-[10px] font-bold uppercase tracking-widest opacity-40 text-right">Market Cap</th>
+                                            <th className="pb-4 text-[10px] font-bold uppercase tracking-widest opacity-40 text-center">Last 7 Days</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-white/5">
+                                        {filteredMarket.map((coin, idx) => (
+                                            <tr key={coin.id} className="hover:bg-white/5 transition-colors group">
+                                                <td className="py-4 text-xs font-bold opacity-30 px-2">{coin.market_cap_rank}</td>
+                                                <td className="py-4">
+                                                    <div className="flex items-center gap-3">
+                                                        <img src={coin.image} className="w-6 h-6 rounded-full" />
+                                                        <div>
+                                                            <p className="text-xs font-bold uppercase">{coin.name}</p>
+                                                            <p className="text-[10px] font-bold opacity-40 uppercase">{coin.symbol}</p>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="py-4 text-xs font-bold text-right">${coin.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}</td>
+                                                <td className={`py-4 text-xs font-bold text-right ${coin.price_change_percentage_24h >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                                    {coin.price_change_percentage_24h?.toFixed(2)}%
+                                                </td>
+                                                <td className="py-4 text-xs font-bold opacity-60 text-right">${(coin.market_cap / 1e9).toFixed(2)}B</td>
+                                                <td className="py-4 flex justify-center">
+                                                    <img 
+                                                        src={`https://www.coingecko.com/coins/${coin.id}/sparkline.svg`} 
+                                                        className={`h-8 w-24 object-contain filter ${coin.price_change_percentage_24h >= 0 ? 'hue-rotate-[80deg] saturate-150' : 'hue-rotate-[-30deg] saturate-150'}`} 
+                                                    />
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
 
-            {/* RESTORED: Hidden/Spam Asset Manager */}
             {showManager && (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
                 <div className={`max-w-2xl w-full border rounded-[3rem] p-6 md:p-10 shadow-2xl flex flex-col max-h-[80vh] ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
@@ -629,7 +719,6 @@
               </div>
             )}
 
-            {/* RESTORED: Full Asset Detail Modal */}
             {selectedAsset && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
                 <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-6 md:p-12 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100'}`}>
