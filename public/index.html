@@ -150,7 +150,8 @@
                 integratedTargetId: "integrated-terminal",
                 // Using Helius RPC for reliable performance
                 endpoint: "https://mainnet.helius-rpc.com/?api-key=95f83906-d8dc-4e2e-a408-d5e6930d8cea", 
-                strictTokenList: true,
+                strictTokenList: false,  // Allow all verified tokens
+                defaultExplorer: "Solscan",  // Better token metadata
                 formProps: {
                     fixedOutputMint: false,
                     initialAmount: "1000000000", // 1 SOL default
