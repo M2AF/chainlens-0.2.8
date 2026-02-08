@@ -269,7 +269,7 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
 const evmChains = [
   { id: 'ethereum', net: 'eth-mainnet' },
   { id: 'abstract', net: 'abstract-mainnet' },
-  { id: 'monad', net: 'monad-testnet' },
+  { id: 'monad', net: 'monad-mainnet' }, // CHANGED ONLY THIS LINE
   { id: 'base', net: 'base-mainnet' },
   { id: 'polygon', net: 'polygon-mainnet' }
 ];
