@@ -117,7 +117,7 @@
       const [isListView, setIsListView] = useState(false);
       
       const [searchQuery, setSearchQuery] = useState('');
-      const [sortBy, setSortBy] = useState('value'); 
+      const [sortBy, setSortBy] = useState('chain'); // Default to chain to show your custom sort immediately
 
       const [resolvedEvm, setResolvedEvm] = useState(null);
       const [isResolving, setIsResolving] = useState(false);
@@ -126,7 +126,6 @@
       const [spamIds, setSpamIds] = useState(() => JSON.parse(localStorage.getItem('spamAssets') || '[]'));
       const [showManager, setShowManager] = useState(false);
 
-      // CoinGecko States
       const [marketData, setMarketData] = useState([]);
       const [marketLoading, setMarketLoading] = useState(false);
       const [marketSearch, setMarketSearch] = useState('');
@@ -139,6 +138,17 @@
         cardano: { color: 'bg-[#0033AD]', label: 'Cardano', native: 'ADA' },
         monad: { color: 'bg-[#836EF9]', label: 'Monad', native: 'MON' },
         abstract: { color: 'bg-[#00FF85] text-black', label: 'Abstract', native: 'ETH' }
+      };
+
+      // Custom priority order for search results
+      const chainPriority = {
+        'cardano': 1,
+        'solana': 2,
+        'ethereum': 3,
+        'abstract': 4,
+        'monad': 5,
+        'base': 6,
+        'polygon': 7
       };
 
       useEffect(() => {
@@ -155,7 +165,6 @@
         localStorage.setItem('spamAssets', JSON.stringify(spamIds));
       }, [hiddenIds, spamIds]);
 
-      // Fetch CoinGecko Market Data
       useEffect(() => {
         const fetchMarket = async () => {
           setMarketLoading(true);
@@ -167,7 +176,7 @@
           setMarketLoading(false);
         };
         fetchMarket();
-        const interval = setInterval(fetchMarket, 60000); // Refresh every minute
+        const interval = setInterval(fetchMarket, 60000);
         return () => clearInterval(interval);
       }, []);
 
@@ -213,7 +222,11 @@
         return filtered.sort((a, b) => {
             if (sortBy === 'value') return (parseFloat(b.totalValue) || 0) - (parseFloat(a.totalValue) || 0);
             if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '');
-            if (sortBy === 'chain') return a.chain.localeCompare(b.chain);
+            if (sortBy === 'chain') {
+                const priorityA = chainPriority[a.chain.toLowerCase()] || 99;
+                const priorityB = chainPriority[b.chain.toLowerCase()] || 99;
+                return priorityA - priorityB;
+            }
             return 0;
         });
       }, [nfts, hiddenIds, spamIds, searchQuery, sortBy]);
@@ -407,7 +420,9 @@
                         {isResolving && <div className="absolute right-4 top-4 animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <ChainButton id="ethereum" /> <ChainButton id="polygon" /> <ChainButton id="base" /> <ChainButton id="abstract" /> <ChainButton id="monad" />
+                        {['abstract', 'base', 'ethereum', 'monad', 'polygon'].map(id => (
+                          <ChainButton key={id} id={id} />
+                        ))}
                       </div>
                     </div>
 
@@ -485,9 +500,9 @@
                                 onChange={(e) => setSortBy(e.target.value)}
                                 className={`py-3 px-4 rounded-2xl border text-[10px] font-bold uppercase outline-none ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
                              >
+                                <option value="chain">Sort: Chain Priority</option>
                                 <option value="value">Sort: Value</option>
                                 <option value="name">Sort: A-Z</option>
-                                <option value="chain">Sort: Chain</option>
                              </select>
                         </div>
                     </div>
@@ -612,7 +627,6 @@
                         </div>
                     </div>
 
-                    {/* COINGECKO MARKET SECTION */}
                     <div className={`mt-12 p-8 rounded-[3rem] border transition-all ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-2xl'}`}>
                         <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-6">
                             <div className="flex items-center gap-4">
