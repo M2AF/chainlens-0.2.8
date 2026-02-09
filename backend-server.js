@@ -18,7 +18,8 @@ const API_KEYS = {
   unstoppable: process.env.UNSTOPPABLE_KEY,
   dexhunter: process.env.DEXHUNTER_PARTNER_ID,
   jupiter: process.env.JUPITER_API_KEY, 
-  uniswap: process.env.UNISWAP_API_KEY  
+  uniswap: process.env.UNISWAP_API_KEY,
+  zerion: process.env.ZERION_KEY
 };
 
 // --- Price Discovery Helper ---
@@ -274,7 +275,6 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
 const evmChains = [
   { id: 'ethereum', net: 'eth-mainnet' },
   { id: 'abstract', net: 'abstract-mainnet' },
-  { id: 'monad', net: 'monad-mainnet' },
   { id: 'base', net: 'base-mainnet' },
   { id: 'polygon', net: 'polygon-mainnet' }
 ];
@@ -282,6 +282,83 @@ const evmChains = [
 evmChains.forEach(chain => {
   app.get(`/api/nfts/${chain.id}/:address`, (req, res) => fetchAlchemyNFTs(chain.net, req.params.address, chain.id).then(n => res.json({ nfts: n })));
   app.get(`/api/tokens/${chain.id}/:address`, (req, res) => fetchAlchemyTokens(chain.net, req.params.address, chain.id).then(t => res.json({ nfts: t })));
+});
+
+// --- Monad (via Zerion API) ---
+app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
+  const { mode, address } = req.params;
+  try {
+    console.log(`📡 Fetching Monad ${mode} for ${address} via Zerion...`);
+    
+    const response = await fetch(`https://api.zerion.io/v1/wallets/${address}/positions/?currency=usd&filter[chain_ids]=monad-devnet&filter[positions]=only_simple&sort=value`, {
+      headers: {
+        'Authorization': `Basic ${Buffer.from(API_KEYS.zerion + ':').toString('base64')}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`❌ Zerion API error: ${response.status}`);
+      return res.json({ nfts: [] });
+    }
+
+    const data = await response.json();
+    const positions = data.data || [];
+    console.log(`✅ Found ${positions.length} positions on Monad`);
+
+    if (mode === 'tokens') {
+      // Filter for fungible tokens
+      const tokens = positions
+        .filter(p => p.attributes?.fungible_info && parseFloat(p.attributes.quantity?.float || 0) > 0)
+        .map(p => {
+          const info = p.attributes.fungible_info;
+          const quantity = parseFloat(p.attributes.quantity?.float || 0);
+          const price = parseFloat(p.attributes.price || 0);
+          
+          return {
+            id: info.implementations?.[0]?.address || p.id,
+            name: info.name || 'Unknown Token',
+            symbol: info.symbol || '???',
+            balance: quantity.toFixed(4),
+            usdPrice: price,
+            totalValue: (quantity * price).toFixed(2),
+            image: info.icon?.url || 'https://via.placeholder.com/400/836EF9/ffffff?text=MON',
+            chain: 'monad',
+            isToken: true
+          };
+        })
+        .filter(t => parseFloat(t.balance) > 0);
+
+      res.json({ nfts: tokens });
+    } else {
+      // Filter for NFTs
+      const nfts = positions
+        .filter(p => p.attributes?.nft_info)
+        .map(p => {
+          const info = p.attributes.nft_info;
+          
+          return {
+            id: `${info.contract_address}-${info.token_id}`,
+            name: info.name || 'Monad NFT',
+            image: info.content?.preview?.url || info.content?.detail?.url || 'https://via.placeholder.com/400/836EF9/ffffff?text=NFT',
+            collection: info.collection?.name || 'Monad Collection',
+            chain: 'monad',
+            contractAddress: info.contract_address,
+            tokenId: info.token_id,
+            isToken: false,
+            metadata: {
+              traits: info.attributes || [],
+              description: info.description || ''
+            }
+          };
+        });
+
+      res.json({ nfts });
+    }
+  } catch (err) {
+    console.error('❌ Monad Zerion error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- Solana ---
