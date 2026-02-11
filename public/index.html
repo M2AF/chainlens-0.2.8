@@ -129,7 +129,6 @@
       const [marketData, setMarketData] = useState([]);
       const [marketLoading, setMarketLoading] = useState(false);
       const [marketSearch, setMarketSearch] = useState('');
-      const [swapType, setSwapType] = useState('crypto');
 
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
@@ -608,165 +607,46 @@
                         </div>
                     </div>
 
-                    {/* SimpleSwap Cross-Chain Exchange - Multi-Type */}
+                    {/* SimpleSwap Cross-Chain Exchange */}
                     <div className={`mt-12 rounded-[3rem] border overflow-hidden transition-all ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-2xl'}`}>
-                        <div className="p-6 border-b border-white/5">
-                            <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
-                                <div className="flex items-center gap-4">
-                                    <h3 className="text-2xl font-heading font-extrabold uppercase">Cross-Chain Exchange</h3>
-                                    <div className="px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20">
-                                        <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Non-Custodial</span>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Powered By</span>
-                                    <span className="text-sm font-heading font-bold">SimpleSwap</span>
+                        <div className="p-6 border-b border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                                <h3 className="text-2xl font-heading font-extrabold uppercase">Cross-Chain Exchange</h3>
+                                <div className="px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Non-Custodial</span>
                                 </div>
                             </div>
-                            
-                            {/* Tab Switcher */}
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setSwapType('crypto')}
-                                    className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
-                                        swapType === 'crypto'
-                                            ? darkMode
-                                                ? 'bg-blue-600 text-white shadow-lg'
-                                                : 'bg-blue-500 text-white shadow-lg'
-                                            : darkMode
-                                                ? 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                                                : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-                                    }`}
-                                >
-                                    <div className="flex flex-col items-center gap-1">
-                                        <span>💱 Crypto</span>
-                                        <span className="text-[8px] opacity-60">BTC, ETH, SOL</span>
-                                    </div>
-                                </button>
-                                <button
-                                    onClick={() => setSwapType('fiat')}
-                                    className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
-                                        swapType === 'fiat'
-                                            ? darkMode
-                                                ? 'bg-emerald-600 text-white shadow-lg'
-                                                : 'bg-emerald-500 text-white shadow-lg'
-                                            : darkMode
-                                                ? 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                                                : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-                                    }`}
-                                >
-                                    <div className="flex flex-col items-center gap-1">
-                                        <span>💵 Fiat</span>
-                                        <span className="text-[8px] opacity-60">USD, EUR, GBP</span>
-                                    </div>
-                                </button>
-                                <button
-                                    onClick={() => setSwapType('defi')}
-                                    className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
-                                        swapType === 'defi'
-                                            ? darkMode
-                                                ? 'bg-purple-600 text-white shadow-lg'
-                                                : 'bg-purple-500 text-white shadow-lg'
-                                            : darkMode
-                                                ? 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                                                : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-                                    }`}
-                                >
-                                    <div className="flex flex-col items-center gap-1">
-                                        <span>🔗 DeFi</span>
-                                        <span className="text-[8px] opacity-60">DEX Tokens</span>
-                                    </div>
-                                </button>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Powered By</span>
+                                <span className="text-sm font-heading font-bold">SimpleSwap</span>
                             </div>
                         </div>
-                        
-                        {/* Widget Container */}
-                        <div className="p-2">
-                            {swapType === 'crypto' && (
-                                <iframe 
-                                    src={`https://simpleswap.io/widget?api_key=e7f2026e-5e26-41ba-a6ed-dc688d2fcae8&theme=${darkMode ? 'dark' : 'light'}`}
-                                    width="100%"
-                                    height="500"
-                                    style={{ border: 'none', borderRadius: '1.5rem' }}
-                                    title="SimpleSwap Crypto Exchange"
-                                />
-                            )}
-                            {swapType === 'fiat' && (
-                                <iframe 
-                                    src={`https://simpleswap.io/widget?api_key=b3bf371b-e510-4ce6-8045-ac41c19ff300&theme=${darkMode ? 'dark' : 'light'}`}
-                                    width="100%"
-                                    height="500"
-                                    style={{ border: 'none', borderRadius: '1.5rem' }}
-                                    title="SimpleSwap Fiat Exchange"
-                                />
-                            )}
-                            {swapType === 'defi' && (
-                                <iframe 
-                                    src={`https://simpleswap.io/widget?api_key=dd6c6b8c-485c-4005-aea8-cb7b7c77330b&theme=${darkMode ? 'dark' : 'light'}`}
-                                    width="100%"
-                                    height="500"
-                                    style={{ border: 'none', borderRadius: '1.5rem' }}
-                                    title="SimpleSwap DeFi Exchange"
-                                />
-                            )}
+                        <div className="p-8 flex justify-center">
+                            <iframe 
+                                id="simpleswap-frame" 
+                                name="SimpleSwap Widget" 
+                                width="528" 
+                                height="392" 
+                                src="https://simpleswap.io/widget/e16a9606-7260-4926-a33d-e6c700b3de3b" 
+                                frameBorder="0"
+                                style={{ maxWidth: '100%' }}
+                            ></iframe>
                         </div>
-                        
-                        {/* Info Footer - Dynamic based on type */}
                         <div className={`p-4 border-t border-white/5 flex flex-wrap gap-4 justify-center ${darkMode ? 'bg-slate-950/50' : 'bg-slate-50'}`}>
-                            {swapType === 'crypto' && (
-                                <>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Supported</p>
-                                        <p className="text-xs font-bold">600+ Cryptocurrencies</p>
-                                    </div>
-                                    <div className="w-px bg-white/10"></div>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Exchange Type</p>
-                                        <p className="text-xs font-bold">Fixed & Floating Rates</p>
-                                    </div>
-                                    <div className="w-px bg-white/10"></div>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Security</p>
-                                        <p className="text-xs font-bold">No Registration Required</p>
-                                    </div>
-                                </>
-                            )}
-                            {swapType === 'fiat' && (
-                                <>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Buy With</p>
-                                        <p className="text-xs font-bold">USD, EUR, GBP & More</p>
-                                    </div>
-                                    <div className="w-px bg-white/10"></div>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Payment Methods</p>
-                                        <p className="text-xs font-bold">Credit Card, Bank Transfer</p>
-                                    </div>
-                                    <div className="w-px bg-white/10"></div>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Speed</p>
-                                        <p className="text-xs font-bold">Instant Delivery</p>
-                                    </div>
-                                </>
-                            )}
-                            {swapType === 'defi' && (
-                                <>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">DeFi Tokens</p>
-                                        <p className="text-xs font-bold">DEX & Farming Tokens</p>
-                                    </div>
-                                    <div className="w-px bg-white/10"></div>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Best Rates</p>
-                                        <p className="text-xs font-bold">Optimized for DeFi</p>
-                                    </div>
-                                    <div className="w-px bg-white/10"></div>
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Access</p>
-                                        <p className="text-xs font-bold">All Major DEX Tokens</p>
-                                    </div>
-                                </>
-                            )}
+                            <div className="text-center">
+                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Supported Chains</p>
+                                <p className="text-xs font-bold">600+ Cryptocurrencies</p>
+                            </div>
+                            <div className="w-px bg-white/10"></div>
+                            <div className="text-center">
+                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Exchange Type</p>
+                                <p className="text-xs font-bold">Fixed & Floating Rates</p>
+                            </div>
+                            <div className="w-px bg-white/10"></div>
+                            <div className="text-center">
+                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-1">Security</p>
+                                <p className="text-xs font-bold">No Registration Required</p>
+                            </div>
                         </div>
                     </div>
 
