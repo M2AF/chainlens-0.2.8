@@ -130,6 +130,9 @@
       const [marketLoading, setMarketLoading] = useState(false);
       const [marketSearch, setMarketSearch] = useState('');
 
+      const [fearGreedData, setFearGreedData] = useState(null);
+      const [fearGreedLoading, setFearGreedLoading] = useState(false);
+
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
         polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon', native: 'POL' },
@@ -176,6 +179,23 @@
         };
         fetchMarket();
         const interval = setInterval(fetchMarket, 60000);
+        return () => clearInterval(interval);
+      }, []);
+
+      useEffect(() => {
+        const fetchFearGreed = async () => {
+          setFearGreedLoading(true);
+          try {
+            const res = await fetch('https://api.alternative.me/fng/?limit=2');
+            const data = await res.json();
+            if (data.data && data.data.length > 0) {
+              setFearGreedData(data.data[0]);
+            }
+          } catch (e) { console.error("Fear & Greed fetch failed", e); }
+          setFearGreedLoading(false);
+        };
+        fetchFearGreed();
+        const interval = setInterval(fetchFearGreed, 3600000); // Update every hour
         return () => clearInterval(interval);
       }, []);
 
@@ -404,6 +424,22 @@
         );
       };
 
+      const getFearGreedColor = (value) => {
+        if (value <= 25) return 'text-red-500';
+        if (value <= 45) return 'text-orange-500';
+        if (value <= 55) return 'text-yellow-500';
+        if (value <= 75) return 'text-lime-500';
+        return 'text-emerald-500';
+      };
+
+      const getFearGreedLabel = (value) => {
+        if (value <= 25) return 'Extreme Fear';
+        if (value <= 45) return 'Fear';
+        if (value <= 55) return 'Neutral';
+        if (value <= 75) return 'Greed';
+        return 'Extreme Greed';
+      };
+
       return (
         <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
           <div className="max-w-[1600px] mx-auto p-4 md:p-8 pt-12">
@@ -422,6 +458,7 @@
                 <div className={`flex p-1 rounded-2xl border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 shadow-md'}`}>
                     <button onClick={() => setActiveTab('portfolio')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'portfolio' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Portfolio View</button>
                     <button onClick={() => setActiveTab('swap')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'swap' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Swap Hub</button>
+                    <button onClick={() => setActiveTab('market')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'market' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Market Watch</button>
                 </div>
 
                 <div className="flex items-center space-x-3 bg-black/5 px-4 py-3 rounded-2xl border border-white/5">
@@ -573,7 +610,7 @@
                   })}
                 </div>
                 </>
-            ) : (
+            ) : activeTab === 'swap' ? (
                 <div className="space-y-8 max-w-[1550px] mx-auto">
                     <div className="text-center">
                          <h2 className="text-4xl font-heading font-extrabold uppercase mb-2">Multi-Chain Swap Hub</h2>
@@ -649,11 +686,66 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            ) : (
+                <div className="space-y-8 max-w-[1550px] mx-auto">
+                    <div className="text-center">
+                        <h2 className="text-4xl font-heading font-extrabold uppercase mb-2">Market Watch</h2>
+                        <p className="text-sm opacity-60">Real-time market sentiment and top cryptocurrencies by market cap.</p>
+                    </div>
 
+                    {/* Bitcoin Fear & Greed Index */}
+                    <div className={`rounded-[3rem] border overflow-hidden transition-all ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-2xl'}`}>
+                        <div className="p-6 border-b border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                                <h3 className="text-2xl font-heading font-extrabold uppercase">Fear & Greed Index</h3>
+                                {fearGreedData && (
+                                    <div className="px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20">
+                                        <span className={`text-[10px] font-bold uppercase tracking-widest ${getFearGreedColor(parseInt(fearGreedData.value))}`}>
+                                            {getFearGreedLabel(parseInt(fearGreedData.value))}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Powered By</span>
+                                <span className="text-sm font-heading font-bold">Alternative.me</span>
+                            </div>
+                        </div>
+                        <div className="p-8 flex justify-center">
+                            {fearGreedLoading ? (
+                                <div className="py-12 text-center">
+                                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 animate-pulse">Loading sentiment data...</p>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center gap-6 w-full">
+                                    <img src="https://alternative.me/crypto/fear-and-greed-index.png" alt="Latest Crypto Fear & Greed Index" className="w-full max-w-2xl h-auto" />
+                                    {fearGreedData && (
+                                        <div className={`p-6 rounded-2xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                                            <div className="text-center">
+                                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-2">Current Index</p>
+                                                <p className={`text-5xl font-heading font-black ${getFearGreedColor(parseInt(fearGreedData.value))}`}>
+                                                    {fearGreedData.value}
+                                                </p>
+                                                <p className={`text-lg font-bold mt-2 ${getFearGreedColor(parseInt(fearGreedData.value))}`}>
+                                                    {getFearGreedLabel(parseInt(fearGreedData.value))}
+                                                </p>
+                                                <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mt-3">
+                                                    Updated: {new Date(fearGreedData.timestamp * 1000).toLocaleDateString()}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* CoinGecko Market Data */}
                     <div className={`mt-12 p-8 rounded-[3rem] border transition-all ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-2xl'}`}>
                         <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-6">
                             <div className="flex items-center gap-4">
-                                <h3 className="text-2xl font-heading font-extrabold uppercase shrink-0">Market Watch</h3>
+                                <h3 className="text-2xl font-heading font-extrabold uppercase shrink-0">Top Assets</h3>
                                 <div className="relative">
                                     <input type="text" placeholder="Search coins..." value={marketSearch} onChange={(e) => setMarketSearch(e.target.value)} className={`py-2 px-4 rounded-xl border text-[10px] font-bold uppercase outline-none transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200'}`} />
                                 </div>
@@ -773,56 +865,4 @@
 
             {selectedAsset && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl modal-enter">
-                <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-6 md:p-12 shadow-2xl border ${darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100'}`}>
-                  <button onClick={() => setSelectedAsset(null)} className="absolute top-10 right-10 w-12 h-12 flex items-center justify-center rounded-full bg-slate-800 hover:bg-red-500 text-white transition-all font-bold">✕</button>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                    <div className="rounded-[2.5rem] overflow-hidden shadow-2xl">
-                       <img src={selectedAsset.image} className="w-full h-auto" />
-                    </div>
-                    <div>
-                       <div className={`inline-block px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest mb-4 ${chainStyles[selectedAsset.chain]?.color} text-white`}>{selectedAsset.chain}</div>
-                       <h1 className="text-4xl font-heading font-black uppercase mb-2 leading-none">{selectedAsset.name}</h1>
-                       <p className="text-sm font-bold opacity-40 uppercase tracking-widest mb-8">{selectedAsset.symbol || 'ASSET'}</p>
-                       {selectedAsset.isToken && (
-                         <div className="mb-8 grid grid-cols-2 gap-4">
-                            <div className="p-4 rounded-2xl bg-black/5 border border-white/5">
-                                <p className="text-[10px] font-bold uppercase opacity-40 mb-1">Quantity</p>
-                                <p className="text-2xl font-heading font-bold">{selectedAsset.balance}</p>
-                            </div>
-                            <div className="p-4 rounded-2xl bg-black/5 border border-white/5">
-                                <p className="text-[10px] font-bold uppercase opacity-40 mb-1">Value USD</p>
-                                <p className="text-2xl font-heading font-bold text-emerald-500">${selectedAsset.totalValue}</p>
-                            </div>
-                         </div>
-                       )}
-                       <div className="space-y-6">
-                          <div>
-                             <h3 className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-3">Attributes</h3>
-                             <div className="flex flex-wrap gap-2">
-                                {selectedAsset.metadata?.traits?.length > 0 ? selectedAsset.metadata.traits.map((t, i) => (
-                                  <div key={i} className="px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                                    <p className="text-[8px] uppercase opacity-60">{t.trait_type}</p>
-                                    <p className="text-[10px] font-bold">{t.value}</p>
-                                  </div>
-                                )) : <p className="text-xs italic opacity-30">No metadata found.</p>}
-                             </div>
-                          </div>
-                          <div className="pt-6 border-t border-white/10">
-                             <button onClick={() => setSelectedAsset(null)} className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold uppercase tracking-widest transition-all">Back to Gallery</button>
-                          </div>
-                       </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    };
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
-</html>
+                <div className={`relative max-w-4xl w-full max-h-[90vh] overflow-y-auto rounded-[3.5rem] p-6 md:p-12 shadow-2xl border ${darkMode ? 'bg-slate
