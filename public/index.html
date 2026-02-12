@@ -407,6 +407,16 @@
       return (
         <div className={`min-h-screen transition-colors duration-500 ${darkMode ? 'bg-slate-950 text-white dark-scroll' : 'bg-slate-50 text-slate-900'}`}>
           <div className="max-w-[1600px] mx-auto p-4 md:p-8 pt-12">
+            {/* Dark Mode Toggle - Top Right */}
+            <div className="absolute top-6 right-6">
+                <div className="flex items-center space-x-3 bg-black/5 px-4 py-3 rounded-2xl border border-white/5">
+                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
+                    <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full cursor-pointer ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                        <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </div>
+                </div>
+            </div>
+
             <div className="flex flex-col items-center mb-8">
               <div className="relative group">
                   <img 
@@ -418,17 +428,11 @@
               </div>
             </div>
 
-            <div className="flex flex-col md:flex-row items-center justify-center gap-6 mb-10">
+            <div className="flex items-center justify-center mb-10">
                 <div className={`flex p-1 rounded-2xl border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 shadow-md'}`}>
                     <button onClick={() => setActiveTab('portfolio')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'portfolio' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Portfolio View</button>
                     <button onClick={() => setActiveTab('swap')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'swap' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Swap Hub</button>
-                </div>
-
-                <div className="flex items-center space-x-3 bg-black/5 px-4 py-3 rounded-2xl border border-white/5">
-                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-                    <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                        <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </div>
+                    <button onClick={() => setActiveTab('market')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'market' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Market Watch</button>
                 </div>
             </div>
 
@@ -650,18 +654,26 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            )}
 
-                    <div className={`mt-12 p-8 rounded-[3rem] border transition-all ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-2xl'}`}>
+            {activeTab === 'market' && (
+                <div className="max-w-6xl mx-auto">
+                    <div className={`p-8 rounded-[3rem] border transition-all ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-2xl'}`}>
+                        <div className="mb-8">
+                            <h2 className="text-4xl font-heading font-extrabold uppercase mb-2">Market Watch</h2>
+                            <p className="text-sm opacity-60">Live cryptocurrency market data powered by CoinGecko</p>
+                        </div>
+                        
                         <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-6">
                             <div className="flex items-center gap-4">
-                                <h3 className="text-2xl font-heading font-extrabold uppercase shrink-0">Market Watch</h3>
                                 <div className="relative">
                                     <input type="text" placeholder="Search coins..." value={marketSearch} onChange={(e) => setMarketSearch(e.target.value)} className={`py-2 px-4 rounded-xl border text-[10px] font-bold uppercase outline-none transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-blue-500' : 'bg-slate-50 border-slate-200'}`} />
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Data Provider</span>
-                                <img src="https://static.coingecko.com/s/coingecko-logo-d13d6bcceddbdc1343911c3003394124967930728e2f6931cca9e95fe773391d.png" className="h-4 grayscale opacity-50" />
+                                <img src="https://static.coingecko.com/s/coingecko-logo-d13d6bcceddbdc1343911c3003394124967930728e2f6931cca9e95fe773391d.png" className="h-4 grayscale opacity-50" alt="CoinGecko" />
                             </div>
                         </div>
                         {marketLoading && marketData.length === 0 ? (
@@ -691,7 +703,7 @@
                                                 <td className="py-4 text-xs font-bold opacity-30 px-2">{coin.market_cap_rank}</td>
                                                 <td className="py-4">
                                                     <div className="flex items-center gap-3">
-                                                        <img src={coin.image} className="w-6 h-6 rounded-full" />
+                                                        <img src={coin.image} className="w-6 h-6 rounded-full" alt={coin.name} />
                                                         <div>
                                                             <p className="text-xs font-bold uppercase">{coin.name}</p>
                                                             <p className="text-[10px] font-bold opacity-40 uppercase">{coin.symbol}</p>
