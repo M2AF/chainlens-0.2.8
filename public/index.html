@@ -457,7 +457,7 @@
 
                     <div className="space-y-4">
                       <div className="flex justify-between items-end">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-500">Solana Network </span>
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-500">Solana Network</label>
                         <button onClick={() => setSolAddr('3noTuHnQdHkat2w5rBx18vAACMzFUvB5LodEe5vMN98d')} className="text-[10px] font-bold text-emerald-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
                       </div>
                       <input type="text" value={solAddr} onChange={e => setSolAddr(e.target.value)} placeholder="Address..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 focus:border-emerald-400'}`} />
@@ -468,7 +468,7 @@
 
                     <div className="space-y-4">
                       <div className="flex justify-between items-end">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-500">Cardano Ledger </span>
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-cyan-500">Cardano Ledger</label>
                         <button onClick={() => setAdaAddr('addr1q950qv0ks9t29mavulaa5jr3sk2s50r5jfsddydjs0pazrfh32tdpt7zttt4mhl6t9purm4c9rv555z7r5mulq78aleqcg9c9h')} className="text-[10px] font-bold text-cyan-500 hover:underline uppercase tracking-tighter">LOAD TEST</button>
                       </div>
                       <input type="text" value={adaAddr} onChange={e => setAdaAddr(e.target.value)} placeholder="$handle..." className={`w-full p-4 rounded-xl border outline-none text-sm transition-all ${darkMode ? 'bg-slate-950 border-slate-800 focus:border-cyan-500' : 'bg-slate-50 border-slate-200 focus:border-cyan-400'}`} />
