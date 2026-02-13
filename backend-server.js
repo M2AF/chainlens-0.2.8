@@ -491,130 +491,161 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
 // --- DIA Market Data Routes ---
 // Top 100 cryptocurrencies with live prices
 app.get('/api/market/top100', async (req, res) => {
+  console.log('📊 Fetching top 100 market data...');
+  
   try {
-    // Popular coins list (top 100 by market cap)
-    const topCoins = [
-      'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'USDC', 'XRP', 'DOGE', 'TON', 'ADA',
-      'AVAX', 'SHIB', 'DOT', 'LINK', 'TRX', 'MATIC', 'DAI', 'LTC', 'BCH', 'UNI',
-      'ATOM', 'XLM', 'OKB', 'ICP', 'FIL', 'APT', 'HBAR', 'ARB', 'VET', 'NEAR',
-      'OP', 'INJ', 'MNT', 'STX', 'GRT', 'RUNE', 'FTM', 'ALGO', 'AAVE', 'ETC',
-      'XMR', 'QNT', 'SAND', 'MANA', 'FLR', 'CHZ', 'EGLD', 'AXS', 'EOS', 'THETA',
-      'XTZ', 'KLAY', 'FLOW', 'MINA', 'ZEC', 'BSV', 'NEO', 'DASH', 'IOTA', 'MKR',
-      'SNX', 'CRV', 'LDO', 'COMP', 'YFI', 'SUSHI', 'ENJ', 'BAT', 'ZIL', '1INCH',
-      'WAVES', 'ICX', 'ONT', 'SC', 'ZRX', 'RVN', 'QTUM', 'BTT', 'HOT', 'CELO',
-      'AR', 'GMT', 'OMG', 'KAVA', 'ROSE', 'ANKR', 'AUDIO', 'CHR', 'REEF', 'SKL',
-      'BAND', 'BNT', 'OCEAN', 'REN', 'FET', 'NMR', 'BAL', 'UMA', 'STORJ', 'KEEP'
-    ];
-
-    // Fetch prices from DIA for each coin
-    const pricePromises = topCoins.map(async (symbol, index) => {
-      try {
-        const response = await fetch(`https://api.diadata.org/v1/quotation/${symbol}`);
-        const data = await response.json();
-        
-        // Estimate market cap (price * rough supply estimates)
-        const supplyEstimates = {
-          'BTC': 19500000, 'ETH': 120000000, 'USDT': 91000000000, 'BNB': 157000000,
-          'SOL': 414000000, 'USDC': 25000000000, 'XRP': 53000000000, 'DOGE': 142000000000
-        };
-        
-        const supply = supplyEstimates[symbol] || 100000000;
-        const marketCap = data.Price * supply;
-        
-        return {
-          id: symbol.toLowerCase(),
-          symbol: symbol,
-          name: data.Name || symbol,
-          current_price: data.Price || 0,
-          market_cap: marketCap,
-          price_change_percentage_24h: data.PriceChange24h || 0,
-          market_cap_rank: index + 1,
-          image: `https://cryptoicons.org/api/icon/${symbol.toLowerCase()}/50`,
-          last_updated: data.Time
-        };
-      } catch (error) {
-        console.error(`Error fetching ${symbol}:`, error.message);
-        return null;
-      }
-    });
-
-    const results = await Promise.all(pricePromises);
-    const validResults = results.filter(r => r !== null && r.current_price > 0);
+    // Use CoinGecko as it's more reliable than DIA for batch data
+    const response = await fetch(
+      'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h'
+    );
     
-    res.json(validResults);
+    if (!response.ok) {
+      throw new Error(`CoinGecko API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log(`✅ Fetched ${data.length} coins from CoinGecko`);
+    
+    res.json(data);
   } catch (err) {
-    console.error('Market data error:', err);
+    console.error('❌ Market data error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Search for specific coin
+// Search for specific coin using DIA
 app.get('/api/market/search/:query', async (req, res) => {
+  const query = req.params.query.toUpperCase();
+  console.log(`🔍 Searching for: ${query}`);
+  
   try {
-    const query = req.params.query.toUpperCase();
+    // Try DIA first
+    const diaResponse = await fetch(`https://api.diadata.org/v1/quotation/${query}`);
+    const diaData = await diaResponse.json();
     
-    // Try to fetch from DIA
-    const response = await fetch(`https://api.diadata.org/v1/quotation/${query}`);
-    const data = await response.json();
-    
-    if (data.Price) {
+    if (diaData.Price && diaData.Price > 0) {
+      console.log(`✅ Found ${query} on DIA: $${diaData.Price}`);
       res.json({
-        symbol: data.Symbol,
-        name: data.Name,
-        price: data.Price,
-        change_24h: data.PriceChange24h || 0,
-        source: data.Source,
-        time: data.Time
+        symbol: diaData.Symbol,
+        name: diaData.Name || query,
+        price: diaData.Price,
+        change_24h: 0, // DIA doesn't provide 24h change in this endpoint
+        source: 'DIA',
+        time: diaData.Time
       });
     } else {
-      res.status(404).json({ error: 'Coin not found' });
+      // Fallback to CoinGecko search
+      console.log(`⚠️ DIA failed for ${query}, trying CoinGecko...`);
+      const cgResponse = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${query.toLowerCase()}`);
+      const cgData = await cgResponse.json();
+      
+      if (cgData && cgData.length > 0) {
+        const coin = cgData[0];
+        console.log(`✅ Found ${query} on CoinGecko: $${coin.current_price}`);
+        res.json({
+          symbol: coin.symbol.toUpperCase(),
+          name: coin.name,
+          price: coin.current_price,
+          change_24h: coin.price_change_percentage_24h || 0,
+          source: 'CoinGecko'
+        });
+      } else {
+        res.status(404).json({ error: 'Coin not found' });
+      }
     }
   } catch (err) {
+    console.error(`❌ Search error for ${query}:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 // Get historical chart data (7 days)
-app.get('/api/market/chart/:symbol', async (req, res) => {
+app.get('/api/market/chart/:coinIdOrSymbol', async (req, res) => {
+  const input = req.params.coinIdOrSymbol.toLowerCase();
+  console.log(`📈 Fetching chart for: ${input}`);
+  
+  // Symbol to CoinGecko ID mapping for top coins
+  const symbolToId = {
+    'btc': 'bitcoin',
+    'eth': 'ethereum',
+    'usdt': 'tether',
+    'bnb': 'binancecoin',
+    'sol': 'solana',
+    'usdc': 'usd-coin',
+    'xrp': 'ripple',
+    'doge': 'dogecoin',
+    'ton': 'the-open-network',
+    'ada': 'cardano',
+    'avax': 'avalanche-2',
+    'shib': 'shiba-inu',
+    'dot': 'polkadot',
+    'link': 'chainlink',
+    'trx': 'tron',
+    'matic': 'matic-network',
+    'dai': 'dai',
+    'ltc': 'litecoin',
+    'bch': 'bitcoin-cash',
+    'uni': 'uniswap',
+    'atom': 'cosmos',
+    'xlm': 'stellar',
+    'okb': 'okb',
+    'icp': 'internet-computer',
+    'fil': 'filecoin',
+    'apt': 'aptos',
+    'hbar': 'hedera-hashgraph',
+    'arb': 'arbitrum',
+    'vet': 'vechain',
+    'near': 'near',
+    'op': 'optimism',
+    'inj': 'injective-protocol',
+    'stx': 'blockstack',
+    'grt': 'the-graph',
+    'ftm': 'fantom',
+    'algo': 'algorand',
+    'aave': 'aave',
+    'etc': 'ethereum-classic'
+  };
+  
+  // Try to convert symbol to ID, or use input as-is if it's already an ID
+  const coinId = symbolToId[input] || input;
+  
   try {
-    const symbol = req.params.symbol.toUpperCase();
+    console.log(`🔍 Using CoinGecko ID: ${coinId}`);
+    const response = await fetch(
+      `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=7&interval=hourly`
+    );
     
-    // Get current price from DIA
-    const currentRes = await fetch(`https://api.diadata.org/v1/quotation/${symbol}`);
-    const currentData = await currentRes.json();
-    
-    if (!currentData.Price) {
-      return res.status(404).json({ error: 'Symbol not found' });
-    }
-
-    // Generate simulated 7-day historical data
-    // In production, you'd use DIA's historical API endpoint
-    const now = Date.now();
-    const dayMs = 24 * 60 * 60 * 1000;
-    const prices = [];
-    
-    // Simulate price history with realistic volatility
-    let basePrice = currentData.Price;
-    for (let i = 168; i >= 0; i--) { // 168 hours = 7 days
-      const volatility = (Math.random() - 0.5) * 0.02; // ±2% volatility
-      basePrice = basePrice * (1 + volatility);
-      prices.push({
-        time: now - (i * 60 * 60 * 1000),
-        price: basePrice
-      });
+    if (!response.ok) {
+      throw new Error(`Chart API error: ${response.status}`);
     }
     
-    // Set last price to current actual price
-    prices[prices.length - 1].price = currentData.Price;
+    const data = await response.json();
+    
+    if (!data.prices || data.prices.length === 0) {
+      throw new Error('No price data available');
+    }
+    
+    // Format data for frontend
+    const formattedPrices = data.prices.map(([time, price]) => ({
+      time,
+      price
+    }));
+    
+    const currentPrice = formattedPrices[formattedPrices.length - 1].price;
+    const yesterdayPrice = formattedPrices[formattedPrices.length - 25]?.price || currentPrice;
+    const change24h = ((currentPrice - yesterdayPrice) / yesterdayPrice) * 100;
+    
+    console.log(`✅ Chart data for ${input.toUpperCase()}: ${formattedPrices.length} data points`);
     
     res.json({
-      symbol: symbol,
-      name: currentData.Name,
-      prices: prices,
-      current_price: currentData.Price,
-      change_24h: currentData.PriceChange24h || 0
+      symbol: input.toUpperCase(),
+      name: input.toUpperCase(),
+      prices: formattedPrices,
+      current_price: currentPrice,
+      change_24h: change24h
     });
   } catch (err) {
+    console.error(`❌ Chart error for ${input}:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
