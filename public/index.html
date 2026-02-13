@@ -130,7 +130,6 @@
       const [marketData, setMarketData] = useState([]);
       const [marketLoading, setMarketLoading] = useState(false);
       const [marketSearch, setMarketSearch] = useState('');
-      const [marketError, setMarketError] = useState(null);
       const [selectedCoin, setSelectedCoin] = useState(null);
       const [showChart, setShowChart] = useState(false);
       const [chartData, setChartData] = useState(null);
@@ -170,39 +169,19 @@
         localStorage.setItem('spamAssets', JSON.stringify(spamIds));
       }, [hiddenIds, spamIds]);
 
-      // Fetch market data from backend
-      const fetchMarketData = async () => {
-        setMarketLoading(true);
-        setMarketError(null);
-        try {
-          console.log('🔄 Fetching market data from /api/market/top100');
-          const res = await fetch('/api/market/top100');
-          console.log('📡 Response status:', res.status);
-          
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-          }
-          
-          const data = await res.json();
-          console.log('✅ Market data received:', data.length, 'coins');
-          
-          if (data.length === 0) {
-            setMarketError('No market data available');
-          } else {
-            setMarketData(data);
-            setMarketError(null); // Clear any previous errors
-          }
-        } catch (e) { 
-          console.error("❌ Market fetch failed:", e);
-          console.error("Error details:", e.message);
-          setMarketError(e.message || 'Failed to load market data. Check if backend is running.');
-        }
-        setMarketLoading(false);
-      };
-
+      // Fetch market data from DIA API
       useEffect(() => {
-        fetchMarketData();
-        const interval = setInterval(fetchMarketData, 60000);
+        const fetchMarket = async () => {
+          setMarketLoading(true);
+          try {
+            const res = await fetch('http://localhost:10000/api/market/top100');
+            const data = await res.json();
+            setMarketData(data);
+          } catch (e) { console.error("Market fetch failed", e); }
+          setMarketLoading(false);
+        };
+        fetchMarket();
+        const interval = setInterval(fetchMarket, 60000); // Update every minute
         return () => clearInterval(interval);
       }, []);
 
@@ -211,11 +190,8 @@
         if (!query.trim()) return;
         setMarketLoading(true);
         try {
-          console.log('Searching for:', query);
-          const res = await fetch(`/api/market/search/${query}`);
+          const res = await fetch(`http://localhost:10000/api/market/search/${query}`);
           const data = await res.json();
-          console.log('Search result:', data);
-          
           if (data.symbol) {
             // Add searched coin to results
             const searchResult = {
@@ -231,7 +207,7 @@
             setMarketData(prev => [searchResult, ...prev.filter(c => c.symbol !== data.symbol)]);
           }
         } catch (e) {
-          console.error("Search failed:", e);
+          console.error("Search failed", e);
         }
         setMarketLoading(false);
       };
@@ -242,24 +218,11 @@
         setShowChart(true);
         setLoadingChart(true);
         try {
-          // Use coin ID if available (CoinGecko format), fallback to symbol
-          const identifier = coin.id || coin.symbol;
-          console.log('📊 Loading chart for:', coin.name || coin.symbol, '(ID:', identifier, ')');
-          
-          const res = await fetch(`/api/market/chart/${identifier}`);
-          
-          if (!res.ok) {
-            throw new Error(`Chart API error: ${res.status}`);
-          }
-          
+          const res = await fetch(`http://localhost:10000/api/market/chart/${coin.symbol}`);
           const data = await res.json();
-          console.log('✅ Chart data received:', data.prices?.length, 'data points');
           setChartData(data);
         } catch (e) {
-          console.error("❌ Chart load failed:", e);
-          console.error("Error details:", e.message);
-          // Show error in modal
-          setChartData({ error: e.message });
+          console.error("Chart load failed", e);
         }
         setLoadingChart(false);
       };
@@ -819,48 +782,20 @@
                                     />
                                     <button
                                         onClick={() => searchCoin(marketSearch)}
-                                        disabled={marketLoading}
-                                        className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all ${marketLoading ? 'opacity-50 cursor-not-allowed' : ''} ${darkMode ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
+                                        className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all ${darkMode ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
                                     >
                                         Search
-                                    </button>
-                                    <button
-                                        onClick={fetchMarketData}
-                                        disabled={marketLoading}
-                                        className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all ${marketLoading ? 'opacity-50 cursor-not-allowed' : ''} ${darkMode ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
-                                    >
-                                        🔄 Refresh
                                     </button>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Data Source</span>
-                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${darkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-500/20 text-emerald-600'}`}>CoinGecko</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Data Oracle</span>
+                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${darkMode ? 'bg-purple-500/10 text-purple-400' : 'bg-purple-500/20 text-purple-600'}`}>DIA</span>
                             </div>
                         </div>
-                        
-                        {marketError && (
-                            <div className={`mb-6 p-4 rounded-xl border ${darkMode ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-red-50 border-red-200 text-red-600'}`}>
-                                <p className="text-sm font-bold mb-1">⚠️ Error Loading Market Data</p>
-                                <p className="text-xs opacity-80">{marketError}</p>
-                                <p className="text-xs opacity-60 mt-2">Make sure your backend is running on the correct port.</p>
-                            </div>
-                        )}
-                        
                         {marketLoading && marketData.length === 0 ? (
                             <div className="py-20 text-center animate-pulse">
                                 <p className="text-[10px] font-bold uppercase tracking-widest opacity-40">Fetching global markets...</p>
-                            </div>
-                        ) : marketData.length === 0 ? (
-                            <div className="py-20 text-center">
-                                <p className="text-lg font-bold mb-2 opacity-40">No Market Data</p>
-                                <p className="text-sm opacity-30 mb-4">Click the refresh button to load data</p>
-                                <button
-                                    onClick={fetchMarketData}
-                                    className={`px-6 py-3 rounded-xl text-sm font-bold uppercase transition-all ${darkMode ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-500 hover:bg-emerald-600 text-white'}`}
-                                >
-                                    🔄 Load Market Data
-                                </button>
                             </div>
                         ) : (
                             <div className="overflow-x-auto">
