@@ -241,91 +241,33 @@
         setLoadingChart(true);
         setChartData(null);
         
-        console.log('📊 Loading chart for:', coin.name, '(' + coin.symbol + ')');
-        
-        // Symbol mapping for Binance (some coins have different symbols)
-        const binanceSymbols = {
-          'USDT': 'BUSDUSDT', // Tether uses BUSD pair
-          'USDC': 'BUSDUSDT', // USDC uses BUSD pair
-          'DAI': 'DAIUSDT'
-        };
-        
-        const symbol = binanceSymbols[coin.symbol.toUpperCase()] || coin.symbol.toUpperCase() + 'USDT';
-        
-        // Try multiple sources for reliability
-        const sources = [
-          {
-            name: 'Binance',
-            fetch: async () => {
-              console.log('  🔄 Trying Binance API...');
-              // Binance klines: [time, open, high, low, close, volume, ...]
-              const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=168`);
-              if (!res.ok) throw new Error(`Binance returned ${res.status}`);
-              const data = await res.json();
-              return data.map(k => ({
-                time: k[0],
-                price: parseFloat(k[4]) // closing price
-              }));
-            }
-          },
-          {
-            name: 'CoinCap',
-            fetch: async () => {
-              console.log('  🔄 Trying CoinCap API...');
-              const coinCapId = coin.symbol.toLowerCase();
-              const end = Date.now();
-              const start = end - (7 * 24 * 60 * 60 * 1000); // 7 days ago
-              const res = await fetch(`https://api.coincap.io/v2/assets/${coinCapId}/history?interval=h1&start=${start}&end=${end}`);
-              if (!res.ok) throw new Error(`CoinCap returned ${res.status}`);
-              const data = await res.json();
-              return data.data.map(d => ({
-                time: d.time,
-                price: parseFloat(d.priceUsd)
-              }));
-            }
-          },
-          {
-            name: 'CoinGecko',
-            fetch: async () => {
-              console.log('  🔄 Trying CoinGecko API...');
-              const res = await fetch(`https://api.coingecko.com/api/v3/coins/${coin.id}/market_chart?vs_currency=usd&days=7&interval=hourly`);
-              if (!res.ok) throw new Error(`CoinGecko returned ${res.status}`);
-              const data = await res.json();
-              return data.prices.map(([time, price]) => ({
-                time,
-                price
-              }));
-            }
+        try {
+          console.log('📊 Loading chart for:', coin.name);
+          // Use CoinGecko chart API
+          const res = await fetch(`https://api.coingecko.com/api/v3/coins/${coin.id}/market_chart?vs_currency=usd&days=7&interval=hourly`);
+          const data = await res.json();
+          
+          if (data.prices && data.prices.length > 0) {
+            const formattedPrices = data.prices.map(([time, price]) => ({
+              time,
+              price
+            }));
+            console.log('✅ Chart loaded:', formattedPrices.length, 'data points');
+            setChartData({
+              symbol: coin.symbol,
+              name: coin.name,
+              prices: formattedPrices,
+              current_price: coin.current_price,
+              change_24h: coin.price_change_percentage_24h
+            });
+          } else {
+            console.error('❌ No price data in response');
+            setChartData({ error: 'No chart data available' });
           }
-        ];
-        
-        // Try each source until one works
-        for (const source of sources) {
-          try {
-            const prices = await source.fetch();
-            
-            if (prices && prices.length > 0) {
-              console.log(`  ✅ Success from ${source.name}:`, prices.length, 'data points');
-              setChartData({
-                symbol: coin.symbol,
-                name: coin.name,
-                prices: prices,
-                current_price: coin.current_price,
-                change_24h: coin.price_change_percentage_24h,
-                source: source.name
-              });
-              setLoadingChart(false);
-              return; // Success! Exit function
-            }
-          } catch (e) {
-            console.warn(`  ⚠️ ${source.name} failed:`, e.message);
-            // Continue to next source
-          }
+        } catch (e) {
+          console.error('❌ Chart load failed:', e);
+          setChartData({ error: e.message });
         }
-        
-        // All sources failed
-        console.error('❌ All chart sources failed');
-        setChartData({ error: 'Could not load chart data from any source' });
         setLoadingChart(false);
       };
 
@@ -338,34 +280,12 @@
 
       // Render chart when chartData loads
       useEffect(() => {
-        console.log('🎨 Chart render useEffect triggered. chartData:', !!chartData, 'prices:', !!chartData?.prices, 'showChart:', showChart);
-        
         if (chartData && chartData.prices && showChart) {
-          console.log('  ✅ All conditions met, rendering chart...');
           const ctx = document.getElementById('priceChart');
-          
-          if (!ctx) {
-            console.error('  ❌ Canvas element not found!');
-            return;
-          }
-          
-          console.log('  📊 Canvas found, Chart.js available:', !!window.Chart);
-          
-          if (!window.Chart) {
-            console.error('  ❌ Chart.js not loaded!');
-            setChartData({ error: 'Chart.js library failed to load' });
-            return;
-          }
-          
-          try {
+          if (ctx) {
             // Destroy previous chart if exists
             const existingChart = Chart.getChart(ctx);
-            if (existingChart) {
-              console.log('  🗑️ Destroying previous chart');
-              existingChart.destroy();
-            }
-            
-            console.log('  🎨 Creating new chart with', chartData.prices.length, 'data points');
+            if (existingChart) existingChart.destroy();
             
             // Create new chart
             new Chart(ctx, {
@@ -432,16 +352,7 @@
                 }
               }
             });
-            
-            console.log('  ✅ Chart created successfully!');
-          } catch (error) {
-            console.error('  ❌ Error creating chart:', error);
-            setChartData({ error: 'Failed to render chart: ' + error.message });
           }
-        } else {
-          if (!chartData) console.log('  ⏸️ No chartData yet');
-          if (!chartData?.prices) console.log('  ⏸️ No prices in chartData');
-          if (!showChart) console.log('  ⏸️ Modal not shown');
         }
       }, [chartData, showChart]);
 
@@ -1024,7 +935,7 @@
                                         {selectedCoin.price_change_percentage_24h >= 0 ? '↑' : '↓'} {Math.abs(selectedCoin.price_change_percentage_24h)?.toFixed(2)}%
                                     </span>
                                 </div>
-                                <p className="text-xs opacity-40 mt-2">Last 7 Days{chartData?.source ? ` · Data from ${chartData.source}` : ''} · Click outside to close</p>
+                                <p className="text-xs opacity-40 mt-2">Last 7 Days · Click outside to close</p>
                             </div>
                             <button onClick={() => setShowChart(false)} className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-800 text-white hover:bg-red-500 transition-colors">✕</button>
                         </div>
@@ -1032,22 +943,15 @@
                         {loadingChart ? (
                             <div className="py-32 text-center animate-pulse">
                                 <p className="text-sm opacity-40">Loading chart data...</p>
-                                <p className="text-xs opacity-30 mt-2">Trying Binance → CoinCap → CoinGecko</p>
                             </div>
                         ) : chartData?.error ? (
                             <div className="py-32 text-center">
                                 <p className="text-lg font-bold mb-2 text-red-500">❌ Chart Load Failed</p>
-                                <p className="text-sm opacity-60 mb-3">{chartData.error}</p>
-                                <p className="text-xs opacity-40">Check browser console (F12) for details</p>
+                                <p className="text-sm opacity-60">{chartData.error}</p>
                             </div>
                         ) : chartData?.prices ? (
-                            <div>
-                                <div className="relative" style={{height: '400px'}}>
-                                    <canvas id="priceChart"></canvas>
-                                </div>
-                                <p className="text-xs opacity-30 mt-2 text-center">
-                                    {chartData.prices.length} data points · {chartData.source || 'Unknown'} API
-                                </p>
+                            <div className="relative" style={{height: '400px'}}>
+                                <canvas id="priceChart"></canvas>
                             </div>
                         ) : (
                             <div className="py-32 text-center">
