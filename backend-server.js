@@ -172,8 +172,17 @@ app.post('/api/swap/evm/quote', async (req, res) => {
 const fetchAlchemyNFTs = async (network, address, chainId) => {
   try {
     const url = `https://${network}.g.alchemy.com/nft/v3/${API_KEYS.alchemy}/getNFTsForOwner?owner=${address}&withMetadata=true`;
+    console.log(`🔍 Fetching NFTs for ${chainId} from:`, url);
+    
     const res = await fetch(url);
     const data = await res.json();
+    
+    if (!res.ok) {
+      console.error(`❌ Alchemy NFT API error for ${chainId}:`, res.status, data);
+      return [];
+    }
+    
+    console.log(`✅ ${chainId}: Found ${data.ownedNfts?.length || 0} NFTs`);
     
     return (data.ownedNfts || []).map(nft => ({
       id: `${chainId}-${nft.contract.address}-${nft.tokenId}`,
@@ -188,6 +197,7 @@ const fetchAlchemyNFTs = async (network, address, chainId) => {
       }
     }));
   } catch (e) { 
+    console.error(`❌ Error fetching NFTs for ${chainId}:`, e.message);
     return []; 
   }
 };
@@ -195,6 +205,7 @@ const fetchAlchemyNFTs = async (network, address, chainId) => {
 const fetchAlchemyTokens = async (network, address, chainId) => {
   try {
     const baseUrl = `https://${network}.g.alchemy.com/v2/${API_KEYS.alchemy}`;
+    console.log(`💰 Fetching tokens for ${chainId} from:`, baseUrl);
     
     const nativeTask = fetch(baseUrl, {
       method: 'POST',
@@ -274,21 +285,27 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
       } catch (e) { return null; }
     }));
 
-    return [...tokens, ...erc20Results.filter(t => t !== null)];
-  } catch (e) { return []; }
+    const filteredTokens = [...tokens, ...erc20Results.filter(t => t !== null)];
+    console.log(`✅ ${chainId}: Found ${filteredTokens.length} tokens`);
+    return filteredTokens;
+  } catch (e) { 
+    console.error(`❌ Error fetching tokens for ${chainId}:`, e.message);
+    return []; 
+  }
 };
 
 // --- Routes ---
+// Alchemy-supported chains confirmed from their API documentation
 const evmChains = [
   { id: 'ethereum', net: 'eth-mainnet' },
-  { id: 'abstract', net: 'abstract-mainnet' },
   { id: 'base', net: 'base-mainnet' },
   { id: 'polygon', net: 'polygon-mainnet' },
-  { id: 'avalanche', net: 'avax-mainnet' },
+  { id: 'avalanche', net: 'avax-mainnet' }, // Confirmed supported by Alchemy
   { id: 'optimism', net: 'opt-mainnet' },
   { id: 'arbitrum', net: 'arb-mainnet' },
   { id: 'blast', net: 'blast-mainnet' },
-  { id: 'zora', net: 'zora-mainnet' }
+  { id: 'zora', net: 'zora-mainnet' },
+  { id: 'abstract', net: 'abstract-mainnet' }
 ];
 
 evmChains.forEach(chain => {
