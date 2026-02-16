@@ -630,7 +630,8 @@
         const modePath = tokenMode ? 'tokens' : 'nfts';
 
         if (targetEvm.startsWith('0x')) {
-          ['ethereum', 'polygon', 'base', 'abstract'].forEach(chain => {
+          // Fetch from all EVM chains that have Alchemy API routes
+          ['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'blast', 'zora', 'abstract'].forEach(chain => {
             if (activeChains.includes(chain)) {
               tasks.push(fetch(`/api/${modePath}/${chain}/${targetEvm}`).then(r => r.json()));
             }
