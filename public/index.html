@@ -108,7 +108,7 @@
       const [evmAddr, setEvmAddr] = useState('');
       const [solAddr, setSolAddr] = useState('');
       const [adaAddr, setAdaAddr] = useState('');
-      const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'solana', 'cardano', 'abstract', 'monad']);
+      const [activeChains, setActiveChains] = useState(['ethereum', 'polygon', 'base', 'avalanche', 'optimism', 'arbitrum', 'blast', 'zora', 'solana', 'cardano', 'abstract', 'monad']);
       
       const [nfts, setNfts] = useState([]);
       const [loading, setLoading] = useState(false);
@@ -140,6 +140,11 @@
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
         polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon', native: 'POL' },
         base: { color: 'bg-[#0052FF]', label: 'Base', native: 'ETH' },
+        avalanche: { color: 'bg-[#E84142]', label: 'Avalanche', native: 'AVAX' },
+        optimism: { color: 'bg-[#FF0420]', label: 'Optimism', native: 'ETH' },
+        arbitrum: { color: 'bg-[#28A0F0]', label: 'Arbitrum', native: 'ETH' },
+        blast: { color: 'bg-[#FCFC03] text-black', label: 'Blast', native: 'ETH' },
+        zora: { color: 'bg-gradient-to-r from-purple-500 to-pink-500', label: 'Zora', native: 'ETH' },
         solana: { color: 'bg-solana-gradient-soft', label: 'Solana', native: 'SOL' },
         cardano: { color: 'bg-[#0033AD]', label: 'Cardano', native: 'ADA' },
         monad: { color: 'bg-[#836EF9]', label: 'Monad', native: 'MON' },
@@ -153,7 +158,12 @@
         'abstract': 4,
         'monad': 5,
         'base': 6,
-        'polygon': 7
+        'polygon': 7,
+        'avalanche': 8,
+        'optimism': 9,
+        'arbitrum': 10,
+        'blast': 11,
+        'zora': 12
       };
 
       useEffect(() => {
@@ -765,7 +775,7 @@
                         {isResolving && <div className="absolute right-4 top-4 animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {['abstract', 'base', 'ethereum', 'monad', 'polygon'].map(id => (
+                        {['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'abstract', 'blast', 'zora', 'monad'].map(id => (
                           <ChainButton key={id} id={id} />
                         ))}
                       </div>

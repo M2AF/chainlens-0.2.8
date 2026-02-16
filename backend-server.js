@@ -27,7 +27,9 @@ const fetchUSDPrice = async (chainId, address) => {
   try {
     const chainMap = { 
       'ethereum': 'ethereum', 'base': 'base', 'polygon': 'polygon', 
-      'abstract': 'abstract', 'monad': 'monad', 'solana': 'solana', 'cardano': 'cardano' 
+      'abstract': 'abstract', 'monad': 'monad', 'solana': 'solana', 'cardano': 'cardano',
+      'avalanche': 'avalanche', 'optimism': 'optimism', 'arbitrum': 'arbitrum',
+      'blast': 'blast', 'zora': 'zora'
     };
     const dsChain = chainMap[chainId] || chainId;
     const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
@@ -216,6 +218,11 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
       nativeSymbol = 'MATIC'; nativeName = 'Polygon'; nativeLogo = 'https://cryptologos.cc/logos/polygon-matic-logo.png';
       nativePriceAddr = '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270';
     }
+    
+    if (chainId === 'avalanche') {
+      nativeSymbol = 'AVAX'; nativeName = 'Avalanche'; nativeLogo = 'https://cryptologos.cc/logos/avalanche-avax-logo.png';
+      nativePriceAddr = '0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7'; // WAVAX
+    }
 
     const nativeUsdPrice = await fetchUSDPrice(chainId, nativePriceAddr);
 
@@ -276,7 +283,12 @@ const evmChains = [
   { id: 'ethereum', net: 'eth-mainnet' },
   { id: 'abstract', net: 'abstract-mainnet' },
   { id: 'base', net: 'base-mainnet' },
-  { id: 'polygon', net: 'polygon-mainnet' }
+  { id: 'polygon', net: 'polygon-mainnet' },
+  { id: 'avalanche', net: 'avax-mainnet' },
+  { id: 'optimism', net: 'opt-mainnet' },
+  { id: 'arbitrum', net: 'arb-mainnet' },
+  { id: 'blast', net: 'blast-mainnet' },
+  { id: 'zora', net: 'zora-mainnet' }
 ];
 
 evmChains.forEach(chain => {

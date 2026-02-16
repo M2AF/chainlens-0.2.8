@@ -134,6 +134,7 @@
       const [showChart, setShowChart] = useState(false);
       const [chartData, setChartData] = useState(null);
       const [loadingChart, setLoadingChart] = useState(false);
+      const [chartTimeframe, setChartTimeframe] = useState('7d'); // 1d, 7d, 1m, 1y, all
 
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
@@ -235,39 +236,132 @@
       };
 
       // Load chart data for popup modal
-      const loadChartData = async (coin) => {
+      const loadChartData = async (coin, timeframe = chartTimeframe) => {
         setSelectedCoin(coin);
         setShowChart(true);
         setLoadingChart(true);
         setChartData(null);
+        setChartTimeframe(timeframe);
         
-        try {
-          console.log('📊 Loading chart for:', coin.name);
-          // Use CoinGecko chart API
-          const res = await fetch(`https://api.coingecko.com/api/v3/coins/${coin.id}/market_chart?vs_currency=usd&days=7&interval=hourly`);
-          const data = await res.json();
-          
-          if (data.prices && data.prices.length > 0) {
-            const formattedPrices = data.prices.map(([time, price]) => ({
-              time,
-              price
-            }));
-            console.log('✅ Chart loaded:', formattedPrices.length, 'data points');
-            setChartData({
-              symbol: coin.symbol,
-              name: coin.name,
-              prices: formattedPrices,
-              current_price: coin.current_price,
-              change_24h: coin.price_change_percentage_24h
-            });
-          } else {
-            console.error('❌ No price data in response');
-            setChartData({ error: 'No chart data available' });
+        console.log('📊 Loading chart for:', coin.name, '(' + coin.symbol + ')', 'Timeframe:', timeframe);
+        
+        // Get timeframe parameters
+        const getTimeframeParams = (tf) => {
+          switch(tf) {
+            case '1d':
+              return { binanceInterval: '5m', binanceLimit: 288, coinGeckoDays: 1, label: '24 Hours' };
+            case '7d':
+              return { binanceInterval: '1h', binanceLimit: 168, coinGeckoDays: 7, label: '7 Days' };
+            case '1m':
+              return { binanceInterval: '4h', binanceLimit: 180, coinGeckoDays: 30, label: '1 Month' };
+            case '1y':
+              return { binanceInterval: '1d', binanceLimit: 365, coinGeckoDays: 365, label: '1 Year' };
+            case 'all':
+              return { binanceInterval: '1w', binanceLimit: 520, coinGeckoDays: 'max', label: 'All Time' };
+            default:
+              return { binanceInterval: '1h', binanceLimit: 168, coinGeckoDays: 7, label: '7 Days' };
           }
-        } catch (e) {
-          console.error('❌ Chart load failed:', e);
-          setChartData({ error: e.message });
+        };
+        
+        const params = getTimeframeParams(timeframe);
+        
+        // Symbol mapping for Binance (some coins have different symbols)
+        const binanceSymbols = {
+          'USDT': 'BUSDUSDT',
+          'USDC': 'BUSDUSDT',
+          'DAI': 'DAIUSDT'
+        };
+        
+        const symbol = binanceSymbols[coin.symbol.toUpperCase()] || coin.symbol.toUpperCase() + 'USDT';
+        
+        // Calculate time range for CoinCap
+        const now = Date.now();
+        const getCoinCapTimeRange = () => {
+          switch(timeframe) {
+            case '1d': return { start: now - (24 * 60 * 60 * 1000), interval: 'm5' };
+            case '7d': return { start: now - (7 * 24 * 60 * 60 * 1000), interval: 'h1' };
+            case '1m': return { start: now - (30 * 24 * 60 * 60 * 1000), interval: 'h6' };
+            case '1y': return { start: now - (365 * 24 * 60 * 60 * 1000), interval: 'd1' };
+            case 'all': return { start: 0, interval: 'd1' }; // All available data
+            default: return { start: now - (7 * 24 * 60 * 60 * 1000), interval: 'h1' };
+          }
+        };
+        
+        const coinCapRange = getCoinCapTimeRange();
+        
+        // Try multiple sources for reliability
+        const sources = [
+          {
+            name: 'Binance',
+            fetch: async () => {
+              console.log('  🔄 Trying Binance API...');
+              const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${params.binanceInterval}&limit=${params.binanceLimit}`);
+              if (!res.ok) throw new Error(`Binance returned ${res.status}`);
+              const data = await res.json();
+              return data.map(k => ({
+                time: k[0],
+                price: parseFloat(k[4]) // closing price
+              }));
+            }
+          },
+          {
+            name: 'CoinCap',
+            fetch: async () => {
+              console.log('  🔄 Trying CoinCap API...');
+              const coinCapId = coin.symbol.toLowerCase();
+              const res = await fetch(`https://api.coincap.io/v2/assets/${coinCapId}/history?interval=${coinCapRange.interval}&start=${coinCapRange.start}&end=${now}`);
+              if (!res.ok) throw new Error(`CoinCap returned ${res.status}`);
+              const data = await res.json();
+              return data.data.map(d => ({
+                time: d.time,
+                price: parseFloat(d.priceUsd)
+              }));
+            }
+          },
+          {
+            name: 'CoinGecko',
+            fetch: async () => {
+              console.log('  🔄 Trying CoinGecko API...');
+              const res = await fetch(`https://api.coingecko.com/api/v3/coins/${coin.id}/market_chart?vs_currency=usd&days=${params.coinGeckoDays}`);
+              if (!res.ok) throw new Error(`CoinGecko returned ${res.status}`);
+              const data = await res.json();
+              return data.prices.map(([time, price]) => ({
+                time,
+                price
+              }));
+            }
+          }
+        ];
+        
+        // Try each source until one works
+        for (const source of sources) {
+          try {
+            const prices = await source.fetch();
+            
+            if (prices && prices.length > 0) {
+              console.log(`  ✅ Success from ${source.name}:`, prices.length, 'data points');
+              setChartData({
+                symbol: coin.symbol,
+                name: coin.name,
+                prices: prices,
+                current_price: coin.current_price,
+                change_24h: coin.price_change_percentage_24h,
+                source: source.name,
+                timeframe: timeframe,
+                timeframeLabel: params.label
+              });
+              setLoadingChart(false);
+              return; // Success! Exit function
+            }
+          } catch (e) {
+            console.warn(`  ⚠️ ${source.name} failed:`, e.message);
+            // Continue to next source
+          }
         }
+        
+        // All sources failed
+        console.error('❌ All chart sources failed');
+        setChartData({ error: 'Could not load chart data from any source' });
         setLoadingChart(false);
       };
 
@@ -280,20 +374,63 @@
 
       // Render chart when chartData loads
       useEffect(() => {
+        console.log('🎨 Chart render useEffect triggered. chartData:', !!chartData, 'prices:', !!chartData?.prices, 'showChart:', showChart);
+        
         if (chartData && chartData.prices && showChart) {
+          console.log('  ✅ All conditions met, rendering chart...');
           const ctx = document.getElementById('priceChart');
-          if (ctx) {
+          
+          if (!ctx) {
+            console.error('  ❌ Canvas element not found!');
+            return;
+          }
+          
+          console.log('  📊 Canvas found, Chart.js available:', !!window.Chart);
+          
+          if (!window.Chart) {
+            console.error('  ❌ Chart.js not loaded!');
+            setChartData({ error: 'Chart.js library failed to load' });
+            return;
+          }
+          
+          try {
             // Destroy previous chart if exists
             const existingChart = Chart.getChart(ctx);
-            if (existingChart) existingChart.destroy();
+            if (existingChart) {
+              console.log('  🗑️ Destroying previous chart');
+              existingChart.destroy();
+            }
+            
+            console.log('  🎨 Creating new chart with', chartData.prices.length, 'data points');
+            
+            // Determine label frequency based on data length
+            const getLabelFrequency = () => {
+              const length = chartData.prices.length;
+              if (length <= 100) return 10; // Show every 10th point for 1D
+              if (length <= 200) return 20; // Show every 20th point for 7D
+              if (length <= 365) return 30; // Show every 30th point for 1M
+              return 50; // Show every 50th point for 1Y/ALL
+            };
+            
+            const labelFreq = getLabelFrequency();
             
             // Create new chart
             new Chart(ctx, {
               type: 'line',
               data: {
                 labels: chartData.prices.map((p, i) => {
-                  if (i % 24 === 0) { // Show every 24 hours
-                    return new Date(p.time).toLocaleDateString([], {month: 'short', day: 'numeric'});
+                  if (i % labelFreq === 0 || i === chartData.prices.length - 1) {
+                    const date = new Date(p.time);
+                    // Show time for 1D, date for others
+                    if (chartData.timeframe === '1d') {
+                      return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                    } else if (chartData.timeframe === '7d') {
+                      return date.toLocaleDateString([], {month: 'short', day: 'numeric'});
+                    } else if (chartData.timeframe === '1m') {
+                      return date.toLocaleDateString([], {month: 'short', day: 'numeric'});
+                    } else {
+                      return date.toLocaleDateString([], {year: 'numeric', month: 'short'});
+                    }
                   }
                   return '';
                 }),
@@ -352,7 +489,16 @@
                 }
               }
             });
+            
+            console.log('  ✅ Chart created successfully!');
+          } catch (error) {
+            console.error('  ❌ Error creating chart:', error);
+            setChartData({ error: 'Failed to render chart: ' + error.message });
           }
+        } else {
+          if (!chartData) console.log('  ⏸️ No chartData yet');
+          if (!chartData?.prices) console.log('  ⏸️ No prices in chartData');
+          if (!showChart) console.log('  ⏸️ Modal not shown');
         }
       }, [chartData, showChart]);
 
@@ -935,23 +1081,56 @@
                                         {selectedCoin.price_change_percentage_24h >= 0 ? '↑' : '↓'} {Math.abs(selectedCoin.price_change_percentage_24h)?.toFixed(2)}%
                                     </span>
                                 </div>
-                                <p className="text-xs opacity-40 mt-2">Last 7 Days · Click outside to close</p>
+                                <p className="text-xs opacity-40 mt-2">{chartData?.timeframeLabel || 'Loading...'}{chartData?.source ? ` · Data from ${chartData.source}` : ''} · Click outside to close</p>
                             </div>
                             <button onClick={() => setShowChart(false)} className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-800 text-white hover:bg-red-500 transition-colors">✕</button>
+                        </div>
+
+                        {/* Timeframe Selector */}
+                        <div className="flex justify-center gap-2 mb-6">
+                            {[
+                                { value: '1d', label: '1D' },
+                                { value: '7d', label: '7D' },
+                                { value: '1m', label: '1M' },
+                                { value: '1y', label: '1Y' },
+                                { value: 'all', label: 'ALL' }
+                            ].map(tf => (
+                                <button
+                                    key={tf.value}
+                                    onClick={() => loadChartData(selectedCoin, tf.value)}
+                                    disabled={loadingChart}
+                                    className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${
+                                        loadingChart ? 'opacity-50 cursor-not-allowed' : ''
+                                    } ${
+                                        chartTimeframe === tf.value
+                                            ? (darkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white')
+                                            : (darkMode ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')
+                                    }`}
+                                >
+                                    {tf.label}
+                                </button>
+                            ))}
                         </div>
 
                         {loadingChart ? (
                             <div className="py-32 text-center animate-pulse">
                                 <p className="text-sm opacity-40">Loading chart data...</p>
+                                <p className="text-xs opacity-30 mt-2">Trying Binance → CoinCap → CoinGecko</p>
                             </div>
                         ) : chartData?.error ? (
                             <div className="py-32 text-center">
                                 <p className="text-lg font-bold mb-2 text-red-500">❌ Chart Load Failed</p>
-                                <p className="text-sm opacity-60">{chartData.error}</p>
+                                <p className="text-sm opacity-60 mb-3">{chartData.error}</p>
+                                <p className="text-xs opacity-40">Check browser console (F12) for details</p>
                             </div>
                         ) : chartData?.prices ? (
-                            <div className="relative" style={{height: '400px'}}>
-                                <canvas id="priceChart"></canvas>
+                            <div>
+                                <div className="relative" style={{height: '400px'}}>
+                                    <canvas id="priceChart"></canvas>
+                                </div>
+                                <p className="text-xs opacity-30 mt-2 text-center">
+                                    {chartData.prices.length} data points · {chartData.source || 'Unknown'} API
+                                </p>
                             </div>
                         ) : (
                             <div className="py-32 text-center">
