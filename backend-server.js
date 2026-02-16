@@ -29,7 +29,8 @@ const fetchUSDPrice = async (chainId, address) => {
       'ethereum': 'ethereum', 'base': 'base', 'polygon': 'polygon', 
       'abstract': 'abstract', 'monad': 'monad', 'solana': 'solana', 'cardano': 'cardano',
       'avalanche': 'avalanche', 'optimism': 'optimism', 'arbitrum': 'arbitrum',
-      'blast': 'blast', 'zora': 'zora'
+      'blast': 'blast', 'zora': 'zora', 'apechain': 'apechain', 'soneium': 'soneium',
+      'ronin': 'ronin', 'worldchain': 'worldchain'
     };
     const dsChain = chainMap[chainId] || chainId;
     const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
@@ -234,6 +235,16 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
       nativeSymbol = 'AVAX'; nativeName = 'Avalanche'; nativeLogo = 'https://cryptologos.cc/logos/avalanche-avax-logo.png';
       nativePriceAddr = '0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7'; // WAVAX
     }
+    
+    if (chainId === 'ronin') {
+      nativeSymbol = 'RON'; nativeName = 'Ronin'; nativeLogo = 'https://cryptologos.cc/logos/ronin-ron-logo.png';
+      nativePriceAddr = '0xe514d9deb7966c8be0ca922de8a064264ea6bcd4'; // WRON
+    }
+    
+    if (chainId === 'apechain') {
+      nativeSymbol = 'APE'; nativeName = 'ApeCoin'; nativeLogo = 'https://cryptologos.cc/logos/apecoin-ape-ape-logo.png';
+      nativePriceAddr = '0x4d224452801aced8b2f0aebe155379bb5d594381'; // APE token
+    }
 
     const nativeUsdPrice = await fetchUSDPrice(chainId, nativePriceAddr);
 
@@ -300,17 +311,38 @@ const evmChains = [
   { id: 'ethereum', net: 'eth-mainnet' },
   { id: 'base', net: 'base-mainnet' },
   { id: 'polygon', net: 'polygon-mainnet' },
-  { id: 'avalanche', net: 'avax-mainnet' }, // Confirmed supported by Alchemy
+  { id: 'avalanche', net: 'avax-mainnet' },
   { id: 'optimism', net: 'opt-mainnet' },
   { id: 'arbitrum', net: 'arb-mainnet' },
   { id: 'blast', net: 'blast-mainnet' },
   { id: 'zora', net: 'zora-mainnet' },
-  { id: 'abstract', net: 'abstract-mainnet' }
+  { id: 'abstract', net: 'abstract-mainnet' },
+  { id: 'apechain', net: 'apechain-mainnet' },
+  { id: 'soneium', net: 'soneium-mainnet' },
+  { id: 'ronin', net: 'ronin-mainnet' },
+  { id: 'worldchain', net: 'worldchain-mainnet' } // World Mobile Chain
+  // Note: Sui is non-EVM and requires separate Sui RPC API
+  // Note: MegaETH, HyperEVM may require verification with Alchemy
 ];
 
 evmChains.forEach(chain => {
-  app.get(`/api/nfts/${chain.id}/:address`, (req, res) => fetchAlchemyNFTs(chain.net, req.params.address, chain.id).then(n => res.json({ nfts: n })));
-  app.get(`/api/tokens/${chain.id}/:address`, (req, res) => fetchAlchemyTokens(chain.net, req.params.address, chain.id).then(t => res.json({ nfts: t })));
+  app.get(`/api/nfts/${chain.id}/:address`, (req, res) => {
+    fetchAlchemyNFTs(chain.net, req.params.address, chain.id)
+      .then(n => res.json({ nfts: n }))
+      .catch(err => {
+        console.error(`❌ Route error for ${chain.id} NFTs:`, err.message);
+        res.json({ nfts: [] });
+      });
+  });
+  
+  app.get(`/api/tokens/${chain.id}/:address`, (req, res) => {
+    fetchAlchemyTokens(chain.net, req.params.address, chain.id)
+      .then(t => res.json({ nfts: t }))
+      .catch(err => {
+        console.error(`❌ Route error for ${chain.id} tokens:`, err.message);
+        res.json({ nfts: [] });
+      });
+  });
 });
 
 // --- Monad (via Zerion API) ---
@@ -680,4 +712,12 @@ app.get('/api/market/chart/:coinIdOrSymbol', async (req, res) => {
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// Validate critical API keys at startup
+if (!API_KEYS.alchemy) {
+  console.error('⚠️  WARNING: ALCHEMY_KEY not found in .env file!');
+  console.error('   EVM chains (Ethereum, Optimism, etc.) will not work without it.');
+} else {
+  console.log('✅ Alchemy API key loaded');
+}
+
 app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server running on port ${PORT}`));
