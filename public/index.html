@@ -876,7 +876,7 @@
                     const rawId = nft.address || nft.id || nft.mint || nft.name;
                     const assetKey = `${nft.chain}-${String(rawId).toLowerCase()}`;
                     return (
-                        <div key={assetKey} onClick={() => setSelectedAsset(nft)} className={`group relative overflow-hidden border transition-all cursor-pointer ${isListView ? `flex items-center p-4 rounded-2xl ${darkMode ? 'bg-slate-900 border-slate-800 hover:border-slate-600' : 'bg-white border-slate-100 hover:shadow-lg hover:border-slate-300'}` : `rounded-[2.5rem] shadow-sm flex flex-col ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 hover:-translate-y-2 hover:shadow-xl'}`}`}>
+                        <div key={assetKey} onClick={() => setSelectedAsset(nft)} className={`group relative overflow-hidden border transition-all cursor-pointer ${isListView ? `flex items-center gap-4 p-4 rounded-2xl ${darkMode ? 'bg-slate-900 border-slate-800 hover:border-slate-600' : 'bg-white border-slate-100 hover:shadow-lg hover:border-slate-300'}` : `rounded-[2.5rem] shadow-sm flex flex-col ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 hover:-translate-y-2 hover:shadow-xl'}`}`}>
                         <div className="absolute top-4 right-4 z-40 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
                             <button onClick={(e) => toggleHide(e, nft)} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/80 hover:bg-blue-500 text-white backdrop-blur-sm border border-white/10">👁️</button>
                             <button onClick={(e) => toggleSpam(e, nft)} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/80 hover:bg-red-600 text-white backdrop-blur-sm border border-white/10">🚫</button>
@@ -887,19 +887,21 @@
                             {nft.chain}
                             </div>
                         </div>
-                        <div className={isListView ? "flex-1 px-6 flex items-center justify-between overflow-hidden" : "p-5 text-center"}>
-                            <div className={isListView ? "flex flex-col min-w-0" : "flex flex-col items-center"}>
-                                <p className={`font-heading font-bold truncate uppercase tracking-tight shrink-0 ${isListView ? 'text-lg max-w-[300px]' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`}>{nft.name}</p>
-                                {isListView && <span className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{nft.symbol || 'ASSET'}</span>}
+                        <div className={isListView ? "flex-1 flex items-center justify-between overflow-hidden min-w-0" : "p-5 text-center"}>
+                            <div className={isListView ? "flex flex-col min-w-0 flex-1 pr-4" : "flex flex-col items-center"}>
+                                <p className={`font-heading font-bold uppercase tracking-tight shrink-0 ${isListView ? 'text-base md:text-lg truncate' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`} style={{maxWidth: isListView ? '180px' : 'auto'}} title={nft.name}>{nft.name}</p>
+                                {isListView && <span className="text-[10px] font-bold opacity-40 uppercase tracking-widest truncate" style={{maxWidth: '180px'}}>{nft.symbol || 'ASSET'}</span>}
                             </div>
                             {(nft.isToken || tokenMode) && (
-                            <div className={isListView ? "text-right flex flex-row items-center gap-8 shrink-0" : "mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
-                                <div className={isListView ? "flex flex-col items-end" : ""}>
-                                    <p className="text-emerald-500 font-bold text-lg leading-none">{nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span></p>
+                            <div className={isListView ? "flex flex-col md:flex-row md:items-center gap-2 md:gap-6 text-right shrink-0" : "mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
+                                {/* Green Balance - Top on mobile, left on desktop */}
+                                <div className="flex flex-col items-end">
+                                    <p className="text-emerald-500 font-bold text-sm md:text-lg leading-tight whitespace-nowrap">{nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span></p>
                                 </div>
-                                <div className="flex flex-col">
-                                    <span className={`font-bold uppercase tracking-tighter text-lg ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>{nft.nativePrice || '0.00'} {chainStyles[nft.chain]?.native || '???'}</span>
-                                    <span className={`font-bold uppercase tracking-tighter text-lg opacity-70 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>${nft.totalValue || '0.00'}</span>
+                                {/* Blue Native + Grey USD - Stack vertically on mobile and desktop */}
+                                <div className="flex flex-col items-end gap-0.5">
+                                    <span className={`font-bold uppercase tracking-tighter text-sm md:text-base whitespace-nowrap ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>{nft.nativePrice || '0.00'} {chainStyles[nft.chain]?.native || '???'}</span>
+                                    <span className={`font-bold uppercase tracking-tighter text-xs md:text-sm opacity-70 whitespace-nowrap ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>${nft.totalValue || '0.00'}</span>
                                 </div>
                             </div>
                             )}
