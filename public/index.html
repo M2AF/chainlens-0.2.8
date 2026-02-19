@@ -888,12 +888,12 @@
                             </div>
                         </div>
                         <div className={isListView ? "flex-1 flex items-center justify-between overflow-hidden min-w-0" : "p-5 text-center"}>
-                            <div className={isListView ? "flex flex-col min-w-0 flex-1 pr-4" : "flex flex-col items-center"}>
+                            <div className={isListView ? "flex flex-col min-w-0 flex-1 pr-4" : "flex flex-col items-center mb-2"}>
                                 <p className={`font-heading font-bold uppercase tracking-tight shrink-0 ${isListView ? 'text-base md:text-lg truncate' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`} style={{maxWidth: isListView ? '100%' : 'auto'}} title={nft.name}>{nft.name}</p>
                                 {isListView && <span className="text-[10px] font-bold opacity-40 uppercase tracking-widest truncate" style={{maxWidth: '100%'}}>{nft.symbol || 'ASSET'}</span>}
                             </div>
                             {(nft.isToken || tokenMode) && (
-                            <div className={isListView ? "flex flex-col items-end justify-center gap-1 text-right shrink-0" : "mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
+                            <div className={isListView ? "flex flex-col items-end justify-center gap-1 text-right shrink-0" : "flex flex-col items-center gap-1 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800"}>
                                 {/* Green: Balance - Top */}
                                 <p className="text-emerald-500 font-bold text-sm md:text-lg leading-tight whitespace-nowrap">
                                     {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
