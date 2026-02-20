@@ -27,7 +27,7 @@ const API_KEYS = {
 
 // --- Price Discovery Helper ---
 
-// CoinGecko IDs for native tokens - used instead of DEX pairs for reliability
+// CoinGecko IDs for all native tokens
 const NATIVE_COINGECKO_IDS = {
   'ETH':  'ethereum',
   'MATIC': 'matic-network',
@@ -41,45 +41,78 @@ const NATIVE_COINGECKO_IDS = {
   'BNB':  'binancecoin',
 };
 
-// Cache CoinGecko prices to avoid hammering it on every token
-const cgPriceCache = {};
-const fetchCoinGeckoPrice = async (coinId) => {
-  if (cgPriceCache[coinId] && Date.now() - cgPriceCache[coinId].ts < 60000) {
-    return cgPriceCache[coinId].price;
-  }
-  try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`);
-    const data = await res.json();
-    const price = data[coinId]?.usd || 0;
-    cgPriceCache[coinId] = { price, ts: Date.now() };
-    return price;
-  } catch (e) { return 0; }
-};
-
-// DexScreener chain ID mapping
+// DexScreener chain IDs — must match their API exactly
 const DS_CHAIN_MAP = {
   'ethereum': 'ethereum', 'base': 'base', 'polygon': 'polygon',
   'abstract': 'abstract', 'monad': 'monad', 'avalanche': 'avalanche',
   'optimism': 'optimism', 'arbitrum': 'arbitrum', 'blast': 'blast',
-  'zora': 'zora', 'apechain': 'apechain', 'soneium': 'soneium',
+  'zora': 'zora', 'apechain': 'ape', 'soneium': 'soneium',
   'ronin': 'ronin', 'worldchain': 'worldchain',
 };
 
+// Price cache — keyed by coinId or contractAddress, TTL 90s
+const priceCache = {};
+const cached = (key, fn) => {
+  if (priceCache[key] && Date.now() - priceCache[key].ts < 90000) return Promise.resolve(priceCache[key].price);
+  return fn().then(price => { priceCache[key] = { price, ts: Date.now() }; return price; }).catch(() => 0);
+};
+
+// Batch-fetch multiple CoinGecko IDs in a single request
+const fetchCoinGeckoBatch = async (ids) => {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return {};
+  // Only fetch IDs not already cached and fresh
+  const toFetch = unique.filter(id => !priceCache[id] || Date.now() - priceCache[id].ts >= 90000);
+  if (toFetch.length) {
+    try {
+      const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${toFetch.join(',')}&vs_currencies=usd`);
+      const data = await res.json();
+      toFetch.forEach(id => { priceCache[id] = { price: data[id]?.usd || 0, ts: Date.now() }; });
+    } catch (e) { /* use cached or 0 */ }
+  }
+  const result = {};
+  unique.forEach(id => { result[id] = priceCache[id]?.price || 0; });
+  return result;
+};
+
+// Single native token price by symbol
+const fetchNativePrice = async (symbol) => {
+  const cgId = NATIVE_COINGECKO_IDS[symbol?.toUpperCase()];
+  if (!cgId) return 0;
+  const batch = await fetchCoinGeckoBatch([cgId]);
+  return batch[cgId] || 0;
+};
+
+// ERC20 token price via DexScreener
 const fetchUSDPrice = async (chainId, address) => {
-  try {
+  if (!address || address === '0x0000000000000000000000000000000000000000') return 0;
+  const key = `ds-${chainId}-${address}`;
+  return cached(key, async () => {
     const dsChain = DS_CHAIN_MAP[chainId] || chainId;
     const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
     const data = await res.json();
     const pair = data.pairs?.find(p => p.chainId === dsChain) || data.pairs?.[0];
     return pair ? parseFloat(pair.priceUsd) : 0;
-  } catch (e) { return 0; }
+  });
 };
 
-// Fetch price by symbol — uses CoinGecko for major native tokens, falls back to DexScreener
-const fetchNativePrice = async (symbol) => {
-  const cgId = NATIVE_COINGECKO_IDS[symbol?.toUpperCase()];
-  if (cgId) return fetchCoinGeckoPrice(cgId);
-  return 0;
+
+// Known Monad token icons — DexScreener doesn't always have logos, so hardcode the main ones
+const MONAD_TOKEN_ICONS = {
+  '0x3bd359c1119da7da1d913d1c4d2b7c461115433a': 'https://assets.coingecko.com/coins/images/54540/small/monad.png', // WMON
+  '0xee8c0e9f1bffb4eb878d8f15f368a02a35481242': 'https://assets.coingecko.com/coins/images/279/small/ethereum.png', // WETH
+  '0xe7cd86e13ac4309349f30b3435a9d337750fc82d': 'https://assets.coingecko.com/coins/images/325/small/Tether.png', // USDT0
+  '0x754704bc059f8c67012fed69bc8a327a5aafb603': 'https://assets.coingecko.com/coins/images/6319/small/usdc.png', // USDC
+  '0x81a224f8a62f52bde942dbf23a56df77a10b7777': 'https://via.placeholder.com/50/836EF9/ffffff?text=EMO', // emonad
+  '0xcf5a6076cfa32686c0df13abada2b40dec133f1d': 'https://via.placeholder.com/50/836EF9/ffffff?text=shMON', // shMON
+  '0x1ad7052bb331a0529c1981c3ec2bc4663498a110': 'https://via.placeholder.com/50/836EF9/ffffff?text=aprMON', // aprMON
+  '0x6131b5fae19ea4f9d964eac0408e4408b66337b5': 'https://via.placeholder.com/50/836EF9/ffffff?text=sMON', // sMON
+};
+const getMonadIcon = (addr, symbol, dsIcon) => {
+  const known = MONAD_TOKEN_ICONS[addr?.toLowerCase()];
+  if (known) return known;
+  if (dsIcon) return dsIcon;  // DexScreener sometimes provides icon in pair data
+  return `https://via.placeholder.com/50/836EF9/ffffff?text=${encodeURIComponent(symbol || 'MON')}`;
 };
 
 // --- DOMAIN RESOLUTION ---
@@ -283,8 +316,9 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
     };
     const { symbol: nativeSymbol, name: nativeName, logo: nativeLogo } = nativeConfig[chainId] || { symbol: 'ETH', name: 'Ether', logo: 'https://cryptologos.cc/logos/ethereum-eth-logo.png' };
 
-    // Use CoinGecko by symbol — avoids chain-specific wrapped token address failures
+    // Pre-fetch native price once via CoinGecko — not inside the per-token loop
     const nativeUsdPrice = await fetchNativePrice(nativeSymbol);
+    console.log(`  ${chainId} native price: $${nativeUsdPrice} for ${nativeSymbol}`);
 
     if (nativeRes.result) {
       const balance = parseInt(nativeRes.result, 16) / 1e18;
@@ -320,6 +354,7 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
         if (balance < 0.000001) return null;
 
         const usdPrice = await fetchUSDPrice(chainId, token.contractAddress);
+        const nativeEquiv = (nativeUsdPrice > 0 && usdPrice > 0) ? (usdPrice * balance / nativeUsdPrice).toFixed(6) : '0.00';
 
         return {
           id: token.contractAddress,
@@ -327,7 +362,7 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
           symbol: metadata.symbol || '???',
           balance: balance.toFixed(4),
           usdPrice: usdPrice,
-          nativePrice: nativeUsdPrice > 0 ? (usdPrice / nativeUsdPrice * balance).toFixed(6) : '0.00',
+          nativePrice: nativeEquiv,
           totalValue: (balance * usdPrice).toFixed(2),
           image: metadata.logo || `https://via.placeholder.com/400/334155/ffffff?text=${metadata.symbol || '$'}`,
           chain: chainId,
@@ -434,16 +469,15 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
       if (rawBalance && rawBalance !== '0') {
         const balance = parseInt(rawBalance, 10) / 1e18;
         if (balance > 0) {
-          const usdPrice = await fetchNativePrice('MON');
           tokens.push({
             id: 'native-mon',
             name: 'Monad',
             symbol: 'MON',
             balance: balance.toFixed(4),
-            usdPrice,
+            usdPrice: monUsdPrice,
             nativePrice: balance.toFixed(4),
             totalValue: (balance * usdPrice).toFixed(2),
-            image: 'https://via.placeholder.com/400/836EF9/ffffff?text=MON',
+            image: 'https://assets.coingecko.com/coins/images/54540/small/monad.png',
             chain: 'monad',
             isToken: true
           });
@@ -453,6 +487,10 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
       // ERC20 tokens — Moralis first, then RPC fallback for unindexed tokens
       const MONAD_RPC = 'https://monad-mainnet.drpc.org';
       const ERC20_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+      // Fetch MON price once — reused for all nativePrice calculations below
+      const monUsdPrice = await fetchNativePrice('MON');
+      console.log(`  MON price: $${monUsdPrice}`);
 
       const moralisResult = erc20Data.result || [];
       console.log(`  Moralis returned ${moralisResult.length} ERC20 tokens`);
@@ -465,16 +503,15 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
           : parseInt(t.balance || '0', 10) / Math.pow(10, decimals);
         if (!balance || balance < 0.000001) return null;
         const usdPrice = await fetchUSDPrice('monad', t.token_address);
-        const monPrice = await fetchNativePrice('MON');
         return {
           id: t.token_address,
           name: t.name || 'Unknown Token',
           symbol: t.symbol || '???',
           balance: balance.toFixed(4),
           usdPrice,
-          nativePrice: monPrice > 0 ? (usdPrice / monPrice * balance).toFixed(6) : '0.00',
+          nativePrice: (monUsdPrice > 0 && usdPrice > 0) ? (usdPrice * balance / monUsdPrice).toFixed(6) : '0.00',
           totalValue: (balance * usdPrice).toFixed(2),
-          image: t.logo || t.thumbnail || `https://via.placeholder.com/400/836EF9/ffffff?text=${t.symbol || 'MON'}`,
+          image: getMonadIcon(t.token_address, t.symbol, t.logo || t.thumbnail),
           chain: 'monad',
           isToken: true,
           address: t.token_address
@@ -567,16 +604,15 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
             console.log(`  ✅ RPC found: ${symbol} (${name}) = ${balance}`);
 
             const usdPrice = await fetchUSDPrice('monad', contractAddr);
-            const monPrice = await fetchNativePrice('MON');
             return {
               id: contractAddr,
               name,
               symbol,
               balance: balance.toFixed(4),
               usdPrice,
-              nativePrice: monPrice > 0 ? (usdPrice / monPrice * balance).toFixed(6) : '0.00',
+              nativePrice: (monUsdPrice > 0 && usdPrice > 0) ? (usdPrice * balance / monUsdPrice).toFixed(6) : '0.00',
               totalValue: (balance * usdPrice).toFixed(2),
-              image: `https://via.placeholder.com/400/836EF9/ffffff?text=${symbol}`,
+              image: getMonadIcon(contractAddr, symbol, null),
               chain: 'monad',
               isToken: true,
               address: contractAddr
@@ -634,7 +670,7 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
                   id: contractAddr, name, symbol,
                   balance: balance.toFixed(4), usdPrice,
                   totalValue: (balance * usdPrice).toFixed(2),
-                  image: `https://via.placeholder.com/400/836EF9/ffffff?text=${symbol}`,
+                  image: getMonadIcon(contractAddr, symbol, null),
                   chain: 'monad', isToken: true, address: contractAddr
                 };
               } catch { return null; }
@@ -824,7 +860,7 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
         image: imageUrl || 'https://via.placeholder.com/400/0033AD/ffffff?text=ADA',
         balance: mode === 'tokens' ? balance.toFixed(2) : null,
         usdPrice: usdPrice,
-        nativePrice: adaPrice > 0 && usdPrice > 0 ? (usdPrice / adaPrice * balance).toFixed(4) : balance.toFixed(2),
+        nativePrice: (adaPrice > 0 && usdPrice > 0) ? (usdPrice * balance / adaPrice).toFixed(4) : '0.00',
         totalValue: (balance * usdPrice).toFixed(2),
         symbol: meta.metadata?.ticker || '',
         isToken: mode === 'tokens',
