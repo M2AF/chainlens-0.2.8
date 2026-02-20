@@ -360,8 +360,8 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
     if (mode === 'tokens') {
       // Fetch native balance + ERC20 tokens
       const [nativeRes, erc20Res] = await Promise.all([
-        fetch(`https://deep-index.moralis.io/api/v2.2/${address}/balance?chain=monad`, { headers: moralisHeaders }),
-        fetch(`https://deep-index.moralis.io/api/v2.2/${address}/erc20?chain=monad`, { headers: moralisHeaders })
+        fetch(`https://deep-index.moralis.io/api/v2.2/${address}/balance?chain=0x8f`, { headers: moralisHeaders }),
+        fetch(`https://deep-index.moralis.io/api/v2.2/${address}/erc20?chain=0x8f`, { headers: moralisHeaders })
       ]);
 
       if (!nativeRes.ok && !erc20Res.ok) {
@@ -420,7 +420,7 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
     } else {
       // Fetch NFTs
       const response = await fetch(
-        `https://deep-index.moralis.io/api/v2.2/${address}/nft?chain=monad&format=decimal&media_items=true`,
+        `https://deep-index.moralis.io/api/v2.2/${address}/nft?chain=0x8f&format=decimal&media_items=true`,
         { headers: moralisHeaders }
       );
 
