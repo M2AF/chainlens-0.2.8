@@ -422,12 +422,14 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
       console.log('  Moralis native response:', JSON.stringify(nativeData));
       console.log('  Moralis ERC20 result count:', erc20Data.result?.length ?? 'no result field');
 
+      // Fetch MON price once — used by native token AND all ERC20 nativePrice calculations
+      const monUsdPrice = await fetchNativePrice('MON');
+
       // Native MON balance
       const rawBalance = nativeData.balance;
       if (rawBalance && rawBalance !== '0') {
         const balance = parseInt(rawBalance, 10) / 1e18;
         if (balance > 0) {
-          const monUsdPrice = await fetchNativePrice('MON');
           tokens.push({
             id: 'native-mon',
             name: 'Monad',
