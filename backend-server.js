@@ -412,11 +412,19 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
         }
       }
 
-      // ERC20 tokens — Moralis returns balance as a decimal string, not hex
+      // ERC20 tokens — log everything Moralis returns so we can debug
+      console.log('  Raw ERC20 data from Moralis:', JSON.stringify(erc20Data.result || []));
       const erc20Tokens = await Promise.all((erc20Data.result || []).map(async (t) => {
-        const decimals = parseInt(t.decimals) || 18;
-        const balance = parseInt(t.balance || '0', 10) / Math.pow(10, decimals);
-        if (!balance || balance < 0.000001) return null;
+        const decimals = parseInt(t.decimals) ?? 18;
+        // Moralis v2.2 often provides balance_formatted as a human-readable float
+        const balance = t.balance_formatted
+          ? parseFloat(t.balance_formatted)
+          : parseInt(t.balance || '0', 10) / Math.pow(10, decimals);
+        console.log(`  ERC20: ${t.symbol} | raw=${t.balance} | formatted=${t.balance_formatted} | decimals=${t.decimals} | parsed=${balance}`);
+        if (!balance || balance < 0.000001) {
+          console.log(`  Filtered out ${t.symbol} — balance too low or zero`);
+          return null;
+        }
         const usdPrice = await fetchUSDPrice('monad', t.token_address);
         return {
           id: t.token_address,
