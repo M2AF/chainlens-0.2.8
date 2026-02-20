@@ -442,89 +442,54 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
       }));
       tokens.push(...moralisTokens.filter(t => t !== null));
 
-      // RPC fallback — scan Transfer logs to catch tokens Moralis hasn't indexed yet
-      console.log('  Running Monad RPC fallback for unindexed ERC20 tokens...');
+      // Ankr multichain fallback — single call returns all ERC20 tokens including unindexed ones
+      console.log('  Running Ankr multichain fallback for Monad ERC20 tokens...');
       const knownAddresses = new Set(moralisResult.map(t => t.token_address?.toLowerCase()));
       try {
-        const paddedAddress = '0x000000000000000000000000' + address.slice(2).toLowerCase();
-        const logsRes = await fetch(MONAD_RPC, {
+        const ankrRes = await fetch('https://rpc.ankr.com/multichain', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            jsonrpc: '2.0', id: 1, method: 'eth_getLogs',
-            params: [{ topics: [ERC20_TRANSFER_TOPIC, null, paddedAddress], fromBlock: '0x0', toBlock: 'latest' }]
+            jsonrpc: '2.0', method: 'ankr_getAccountBalance', id: 1,
+            params: {
+              blockchain: 'monad',
+              walletAddress: address,
+              onlyWhitelisted: false,
+              pageSize: 50
+            }
           })
         });
-        const logsData = await logsRes.json();
-        const logs = logsData.result || [];
-        console.log(`  Found ${logs.length} inbound Transfer logs via RPC`);
+        const ankrData = await ankrRes.json();
+        console.log('  Ankr response:', JSON.stringify(ankrData).slice(0, 300));
 
-        const newContracts = [...new Set(
-          logs.map(l => l.address?.toLowerCase()).filter(a => a && !knownAddresses.has(a))
-        )];
-        console.log(`  ${newContracts.length} new contract addresses to query`);
+        const ankrAssets = ankrData.result?.assets || [];
+        console.log(`  Ankr returned ${ankrAssets.length} assets`);
 
-        const decodeString = (hex) => {
-          if (!hex || hex === '0x') return '';
-          try {
-            const clean = hex.slice(2);
-            const len = parseInt(clean.slice(64, 128), 16);
-            const str = clean.slice(128, 128 + len * 2);
-            return Buffer.from(str, 'hex').toString('utf8').replace(/\0/g, '');
-          } catch { return ''; }
-        };
-
-        const rpcTokens = await Promise.all(newContracts.slice(0, 20).map(async (contractAddr) => {
-          try {
-            const makeCall = (data) => JSON.stringify({
-              jsonrpc: '2.0', method: 'eth_call',
-              params: [{ to: contractAddr, data }, 'latest'], id: 1
-            });
-            const balanceData  = '0x70a08231' + '000000000000000000000000' + address.slice(2).toLowerCase();
-            const decimalsData = '0x313ce567';
-            const symbolData   = '0x95d89b41';
-            const nameData     = '0x06fdde03';
-
-            const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
-            const [balRes, decRes, symRes, nameRes] = await Promise.all([
-              fetch(MONAD_RPC, { ...opts, body: makeCall(balanceData) }).then(r => r.json()),
-              fetch(MONAD_RPC, { ...opts, body: makeCall(decimalsData) }).then(r => r.json()),
-              fetch(MONAD_RPC, { ...opts, body: makeCall(symbolData) }).then(r => r.json()),
-              fetch(MONAD_RPC, { ...opts, body: makeCall(nameData) }).then(r => r.json()),
-            ]);
-
-            const rawBalance = balRes.result && balRes.result !== '0x' ? BigInt(balRes.result) : 0n;
-            if (rawBalance === 0n) return null;
-
-            const decimals = decRes.result && decRes.result !== '0x' ? parseInt(decRes.result, 16) : 18;
-            const symbol   = decodeString(symRes.result) || 'UNKNOWN';
-            const name     = decodeString(nameRes.result) || symbol;
-            const balance  = Number(rawBalance) / Math.pow(10, decimals);
-
-            if (balance < 0.000001) return null;
-            console.log(`  RPC found: ${symbol} balance=${balance}`);
-
-            const usdPrice = await fetchUSDPrice('monad', contractAddr);
-            return {
-              id: contractAddr,
-              name,
-              symbol,
-              balance: balance.toFixed(4),
-              usdPrice,
-              totalValue: (balance * usdPrice).toFixed(2),
-              image: `https://via.placeholder.com/400/836EF9/ffffff?text=${symbol}`,
-              chain: 'monad',
-              isToken: true,
-              address: contractAddr
-            };
-          } catch (e) {
-            console.error(`  RPC token lookup failed for ${contractAddr}:`, e.message);
-            return null;
-          }
-        }));
-        tokens.push(...rpcTokens.filter(t => t !== null));
+        const ankrTokens = await Promise.all(
+          ankrAssets
+            .filter(a => a.tokenType === 'ERC20' && !knownAddresses.has(a.contractAddress?.toLowerCase()))
+            .map(async (a) => {
+              const balance = parseFloat(a.balance || '0');
+              if (balance < 0.000001) return null;
+              console.log(`  Ankr ERC20: ${a.tokenSymbol} balance=${balance}`);
+              const usdPrice = parseFloat(a.tokenPrice || '0');
+              return {
+                id: a.contractAddress,
+                name: a.tokenName || a.tokenSymbol || 'Unknown Token',
+                symbol: a.tokenSymbol || '???',
+                balance: balance.toFixed(4),
+                usdPrice,
+                totalValue: (balance * usdPrice).toFixed(2),
+                image: a.thumbnail || `https://via.placeholder.com/400/836EF9/ffffff?text=${a.tokenSymbol || 'MON'}`,
+                chain: 'monad',
+                isToken: true,
+                address: a.contractAddress
+              };
+            })
+        );
+        tokens.push(...ankrTokens.filter(t => t !== null));
       } catch (e) {
-        console.error('  Monad RPC log scan failed:', e.message);
+        console.error('  Ankr multichain fallback failed:', e.message);
       }
 
       console.log(`✅ Monad: Found ${tokens.length} tokens via Moralis`);
