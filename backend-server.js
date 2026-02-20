@@ -1,4 +1,6 @@
-require('dotenv').config();
+require('dotenv').config({ path: __dirname + '/.env' });
+const _envCheck = { moralis: !!process.env.MORALIS_KEY, alchemy: !!process.env.ALCHEMY_KEY, cwd: process.cwd(), dir: __dirname };
+console.log('🔑 ENV check:', JSON.stringify(_envCheck));
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
