@@ -645,42 +645,9 @@
             }
           });
 
-          // Monad Mainnet via BlockVision
+          // Monad Mainnet via Moralis (backend)
           if (activeChains.includes('monad')) {
-            const bvUrl = tokenMode 
-              ? `https://api.blockvision.org/v2/monad/account/tokens?account=${targetEvm}`
-              : `https://api.blockvision.org/v2/monad/account/nfts?account=${targetEvm}`;
-            
-            tasks.push(
-              fetch(bvUrl, {
-                headers: {
-                  'accept': 'application/json',
-                  'x-api-key': 'bv_67890_monad_key_placeholder' // Replace with your actual BlockVision key
-                }
-              })
-              .then(r => r.json())
-              .then(data => {
-                const results = data.result?.tokens || data.result?.data || [];
-                return {
-                  nfts: results.map(item => ({
-                    name: item.name || 'Unknown Monad Asset',
-                    symbol: item.symbol || 'MON',
-                    balance: item.balance || "1",
-                    image: item.logo || item.image || item.imageURL || null,
-                    chain: 'monad',
-                    totalValue: item.usdValue || "0.00",
-                    nativePrice: item.price || "0.00",
-                    address: item.tokenAddress || item.contractAddress,
-                    isToken: tokenMode,
-                    metadata: item.metadata || {}
-                  }))
-                };
-              })
-              .catch(err => {
-                console.error("BlockVision Monad Error:", err);
-                return { nfts: [] };
-              })
-            );
+            tasks.push(fetch(`/api/${modePath}/monad/${targetEvm}`).then(r => r.json()));
           }
         }
 
