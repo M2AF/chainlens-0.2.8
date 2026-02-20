@@ -867,7 +867,7 @@
                                 </p>
                                 {/* Blue: Native - Middle */}
                                 <span className={`font-bold uppercase tracking-tighter text-sm md:text-base whitespace-nowrap ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-                                    {nft.nativePrice || '0.00'} {chainStyles[nft.chain]?.native || '???'}
+                                    {parseFloat(nft.nativePrice || 0).toFixed(4)} {chainStyles[nft.chain]?.native || '???'}
                                 </span>
                                 {/* Grey: USD - Bottom */}
                                 <span className={`font-bold uppercase tracking-tighter text-xs md:text-sm opacity-70 whitespace-nowrap ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
