@@ -442,54 +442,166 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
       }));
       tokens.push(...moralisTokens.filter(t => t !== null));
 
-      // Ankr multichain fallback — single call returns all ERC20 tokens including unindexed ones
-      console.log('  Running Ankr multichain fallback for Monad ERC20 tokens...');
+      // Direct RPC fallback using official Monad RPC endpoints
+      // Calls balanceOf for a curated list of known Monad tokens + scans recent Transfer logs
+      console.log('  Running direct RPC fallback for unindexed Monad ERC20 tokens...');
       const knownAddresses = new Set(moralisResult.map(t => t.token_address?.toLowerCase()));
-      try {
-        const ankrRes = await fetch('https://rpc.ankr.com/multichain', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0', method: 'ankr_getAccountBalance', id: 1,
-            params: {
-              blockchain: 'monad',
-              walletAddress: address,
-              onlyWhitelisted: false,
-              pageSize: 50
+
+      // Known popular Monad mainnet token contracts
+      const KNOWN_MONAD_TOKENS = [
+        '0x81a224f8a62f52bde942dbf23a56df77a10b7777', // emonad (EMO)
+        '0x3bd359c1119da7da1d913d1c4d2b7c461115433a', // Wrapped MON (WMON)
+        '0xee8c0e9f1bffb4eb878d8f15f368a02a35481242', // Wrapped ETH (WETH)
+        '0xe7cd86e13ac4309349f30b3435a9d337750fc82d', // USDT0
+        '0x01bff41798a0bcf287b996046ca68b395dbc1071', // XAUt0
+        '0x754704bc059f8c67012fed69bc8a327a5aafb603', // USDC
+        '0x1ad7052bb331a0529c1981c3ec2bc4663498a110', // aprMON
+        '0xcf5a6076cfa32686c0df13abada2b40dec133f1d', // shMON
+        '0x6131b5fae19ea4f9d964eac0408e4408b66337b5', // sMON (Kintsu)
+      ];
+
+      const MONAD_RPCS = [
+        'https://rpc.monad.xyz',
+        'https://rpc1.monad.xyz',
+        'https://rpc2.monad.xyz',
+      ];
+
+      const decodeString = (hex) => {
+        if (!hex || hex === '0x') return '';
+        try {
+          const clean = hex.slice(2);
+          // Try as UTF-8 string with ABI encoding (offset + length + data)
+          if (clean.length >= 128) {
+            const len = parseInt(clean.slice(64, 128), 16);
+            if (len > 0 && len < 100) {
+              const str = clean.slice(128, 128 + len * 2);
+              return Buffer.from(str, 'hex').toString('utf8').replace(/ /g, '').trim();
             }
-          })
-        });
-        const ankrData = await ankrRes.json();
-        console.log('  Ankr response:', JSON.stringify(ankrData).slice(0, 300));
+          }
+          // Fallback: try as bytes32 fixed string
+          return Buffer.from(clean.replace(/^0+/, '').padStart(64, '0').slice(0, 64), 'hex')
+            .toString('utf8').replace(/ /g, '').trim();
+        } catch { return ''; }
+      };
 
-        const ankrAssets = ankrData.result?.assets || [];
-        console.log(`  Ankr returned ${ankrAssets.length} assets`);
+      const rpcCall = async (method, params) => {
+        for (const rpc of MONAD_RPCS) {
+          try {
+            const res = await fetch(rpc, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+            });
+            const data = await res.json();
+            if (data.result !== undefined) return data.result;
+          } catch (e) { /* try next RPC */ }
+        }
+        return null;
+      };
 
-        const ankrTokens = await Promise.all(
-          ankrAssets
-            .filter(a => a.tokenType === 'ERC20' && !knownAddresses.has(a.contractAddress?.toLowerCase()))
-            .map(async (a) => {
-              const balance = parseFloat(a.balance || '0');
-              if (balance < 0.000001) return null;
-              console.log(`  Ankr ERC20: ${a.tokenSymbol} balance=${balance}`);
-              const usdPrice = parseFloat(a.tokenPrice || '0');
-              return {
-                id: a.contractAddress,
-                name: a.tokenName || a.tokenSymbol || 'Unknown Token',
-                symbol: a.tokenSymbol || '???',
-                balance: balance.toFixed(4),
-                usdPrice,
-                totalValue: (balance * usdPrice).toFixed(2),
-                image: a.thumbnail || `https://via.placeholder.com/400/836EF9/ffffff?text=${a.tokenSymbol || 'MON'}`,
-                chain: 'monad',
-                isToken: true,
-                address: a.contractAddress
-              };
-            })
-        );
-        tokens.push(...ankrTokens.filter(t => t !== null));
+      try {
+        // Step 1: Check balances for known token list
+        const contractsToCheck = KNOWN_MONAD_TOKENS.filter(a => !knownAddresses.has(a.toLowerCase()));
+        console.log(`  Checking ${contractsToCheck.length} known token contracts via RPC...`);
+
+        const rpcTokens = await Promise.all(contractsToCheck.map(async (contractAddr) => {
+          try {
+            const balanceData = '0x70a08231' + '000000000000000000000000' + address.slice(2).toLowerCase();
+            const [balResult, decResult, symResult, nameResult] = await Promise.all([
+              rpcCall('eth_call', [{ to: contractAddr, data: balanceData }, 'latest']),
+              rpcCall('eth_call', [{ to: contractAddr, data: '0x313ce567' }, 'latest']),
+              rpcCall('eth_call', [{ to: contractAddr, data: '0x95d89b41' }, 'latest']),
+              rpcCall('eth_call', [{ to: contractAddr, data: '0x06fdde03' }, 'latest']),
+            ]);
+
+            if (!balResult || balResult === '0x' || balResult === '0x' + '0'.repeat(64)) return null;
+            const rawBal = BigInt(balResult);
+            if (rawBal === 0n) return null;
+
+            const decimals = decResult && decResult !== '0x' ? parseInt(decResult, 16) : 18;
+            const symbol = decodeString(symResult) || 'UNKNOWN';
+            const name = decodeString(nameResult) || symbol;
+            const balance = Number(rawBal) / Math.pow(10, decimals);
+
+            if (balance < 0.000001) return null;
+            console.log(`  ✅ RPC found: ${symbol} (${name}) = ${balance}`);
+
+            const usdPrice = await fetchUSDPrice('monad', contractAddr);
+            return {
+              id: contractAddr,
+              name,
+              symbol,
+              balance: balance.toFixed(4),
+              usdPrice,
+              totalValue: (balance * usdPrice).toFixed(2),
+              image: `https://via.placeholder.com/400/836EF9/ffffff?text=${symbol}`,
+              chain: 'monad',
+              isToken: true,
+              address: contractAddr
+            };
+          } catch (e) {
+            console.error(`  RPC balanceOf failed for ${contractAddr}:`, e.message);
+            return null;
+          }
+        }));
+        tokens.push(...rpcTokens.filter(t => t !== null));
+
+        // Step 2: Scan recent Transfer logs to catch any tokens not in our known list
+        const ERC20_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+        const paddedAddress = '0x000000000000000000000000' + address.slice(2).toLowerCase();
+        const latestBlock = await rpcCall('eth_blockNumber', []);
+        if (latestBlock) {
+          const latest = parseInt(latestBlock, 16);
+          // Only scan last 500k blocks to avoid timeout
+          const fromBlock = '0x' + Math.max(0, latest - 500000).toString(16);
+          console.log(`  Scanning Transfer logs from block ${fromBlock} to latest...`);
+          const logs = await rpcCall('eth_getLogs', [{
+            topics: [ERC20_TRANSFER_TOPIC, null, paddedAddress],
+            fromBlock,
+            toBlock: 'latest'
+          }]);
+
+          if (logs && logs.length > 0) {
+            console.log(`  Found ${logs.length} inbound Transfer logs`);
+            const newContracts = [...new Set(
+              logs.map(l => l.address?.toLowerCase())
+                .filter(a => a && !knownAddresses.has(a) && !KNOWN_MONAD_TOKENS.map(x=>x.toLowerCase()).includes(a))
+            )];
+            console.log(`  ${newContracts.length} additional contracts to check`);
+
+            const extraTokens = await Promise.all(newContracts.slice(0, 15).map(async (contractAddr) => {
+              try {
+                const balanceData = '0x70a08231' + '000000000000000000000000' + address.slice(2).toLowerCase();
+                const [balResult, decResult, symResult, nameResult] = await Promise.all([
+                  rpcCall('eth_call', [{ to: contractAddr, data: balanceData }, 'latest']),
+                  rpcCall('eth_call', [{ to: contractAddr, data: '0x313ce567' }, 'latest']),
+                  rpcCall('eth_call', [{ to: contractAddr, data: '0x95d89b41' }, 'latest']),
+                  rpcCall('eth_call', [{ to: contractAddr, data: '0x06fdde03' }, 'latest']),
+                ]);
+                if (!balResult || balResult === '0x') return null;
+                const rawBal = BigInt(balResult);
+                if (rawBal === 0n) return null;
+                const decimals = decResult && decResult !== '0x' ? parseInt(decResult, 16) : 18;
+                const symbol = decodeString(symResult) || 'UNKNOWN';
+                const name = decodeString(nameResult) || symbol;
+                const balance = Number(rawBal) / Math.pow(10, decimals);
+                if (balance < 0.000001) return null;
+                console.log(`  ✅ Log scan found: ${symbol} = ${balance}`);
+                const usdPrice = await fetchUSDPrice('monad', contractAddr);
+                return {
+                  id: contractAddr, name, symbol,
+                  balance: balance.toFixed(4), usdPrice,
+                  totalValue: (balance * usdPrice).toFixed(2),
+                  image: `https://via.placeholder.com/400/836EF9/ffffff?text=${symbol}`,
+                  chain: 'monad', isToken: true, address: contractAddr
+                };
+              } catch { return null; }
+            }));
+            tokens.push(...extraTokens.filter(t => t !== null));
+          }
+        }
       } catch (e) {
-        console.error('  Ankr multichain fallback failed:', e.message);
+        console.error('  Monad RPC fallback error:', e.message);
       }
 
       console.log(`✅ Monad: Found ${tokens.length} tokens via Moralis`);
