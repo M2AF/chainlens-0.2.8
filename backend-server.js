@@ -352,29 +352,48 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
   try {
     console.log(`📡 Fetching Monad ${mode} for ${address} via Moralis...`);
 
+    if (!API_KEYS.moralis) {
+      console.error('❌ MORALIS_KEY is missing from .env!');
+      return res.json({ nfts: [] });
+    }
+
     const moralisHeaders = {
       'accept': 'application/json',
       'X-API-Key': API_KEYS.moralis
     };
 
     if (mode === 'tokens') {
-      // Fetch native balance + ERC20 tokens
       const [nativeRes, erc20Res] = await Promise.all([
         fetch(`https://deep-index.moralis.io/api/v2.2/${address}/balance?chain=0x8f`, { headers: moralisHeaders }),
         fetch(`https://deep-index.moralis.io/api/v2.2/${address}/erc20?chain=0x8f`, { headers: moralisHeaders })
       ]);
 
-      if (!nativeRes.ok && !erc20Res.ok) {
-        console.error(`❌ Moralis token API error: native=${nativeRes.status} erc20=${erc20Res.status}`);
+      // Log full error body for both — previously this was swallowed silently
+      if (!nativeRes.ok) {
+        const errBody = await nativeRes.text();
+        console.error(`❌ Moralis native balance error ${nativeRes.status}:`, errBody);
+      }
+      if (!erc20Res.ok) {
+        const errBody = await erc20Res.text();
+        console.error(`❌ Moralis ERC20 error ${erc20Res.status}:`, errBody);
+      }
+
+      // Previous code used AND (&&) — if only one failed we'd silently get NaN balances.
+      // Now bail if either fails.
+      if (!nativeRes.ok || !erc20Res.ok) {
         return res.json({ nfts: [] });
       }
 
       const tokens = [];
+      const [nativeData, erc20Data] = await Promise.all([nativeRes.json(), erc20Res.json()]);
+
+      console.log('  Moralis native response:', JSON.stringify(nativeData));
+      console.log('  Moralis ERC20 result count:', erc20Data.result?.length ?? 'no result field');
 
       // Native MON balance
-      if (nativeRes.ok) {
-        const nativeData = await nativeRes.json();
-        const balance = parseFloat(nativeData.balance || '0') / 1e18;
+      const rawBalance = nativeData.balance;
+      if (rawBalance && rawBalance !== '0') {
+        const balance = parseInt(rawBalance, 10) / 1e18;
         if (balance > 0) {
           const usdPrice = await fetchUSDPrice('monad', '0x0000000000000000000000000000000000000000');
           tokens.push({
@@ -391,28 +410,26 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
         }
       }
 
-      // ERC20 tokens
-      if (erc20Res.ok) {
-        const erc20Data = await erc20Res.json();
-        const erc20Tokens = await Promise.all((erc20Data.result || []).map(async (t) => {
-          const balance = parseFloat(t.balance || '0') / Math.pow(10, parseInt(t.decimals) || 18);
-          if (balance < 0.000001) return null;
-          const usdPrice = await fetchUSDPrice('monad', t.token_address);
-          return {
-            id: t.token_address,
-            name: t.name || 'Unknown Token',
-            symbol: t.symbol || '???',
-            balance: balance.toFixed(4),
-            usdPrice,
-            totalValue: (balance * usdPrice).toFixed(2),
-            image: t.logo || `https://via.placeholder.com/400/836EF9/ffffff?text=${t.symbol || 'MON'}`,
-            chain: 'monad',
-            isToken: true,
-            address: t.token_address
-          };
-        }));
-        tokens.push(...erc20Tokens.filter(t => t !== null));
-      }
+      // ERC20 tokens — Moralis returns balance as a decimal string, not hex
+      const erc20Tokens = await Promise.all((erc20Data.result || []).map(async (t) => {
+        const decimals = parseInt(t.decimals) || 18;
+        const balance = parseInt(t.balance || '0', 10) / Math.pow(10, decimals);
+        if (!balance || balance < 0.000001) return null;
+        const usdPrice = await fetchUSDPrice('monad', t.token_address);
+        return {
+          id: t.token_address,
+          name: t.name || 'Unknown Token',
+          symbol: t.symbol || '???',
+          balance: balance.toFixed(4),
+          usdPrice,
+          totalValue: (balance * usdPrice).toFixed(2),
+          image: t.logo || t.thumbnail || `https://via.placeholder.com/400/836EF9/ffffff?text=${t.symbol || 'MON'}`,
+          chain: 'monad',
+          isToken: true,
+          address: t.token_address
+        };
+      }));
+      tokens.push(...erc20Tokens.filter(t => t !== null));
 
       console.log(`✅ Monad: Found ${tokens.length} tokens via Moralis`);
       res.json({ nfts: tokens });
@@ -425,23 +442,30 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
       );
 
       if (!response.ok) {
-        console.error(`❌ Moralis NFT API error: ${response.status}`);
+        const errBody = await response.text();
+        console.error(`❌ Moralis NFT error ${response.status}:`, errBody);
         return res.json({ nfts: [] });
       }
 
       const data = await response.json();
+      console.log('  Moralis NFT result count:', data.result?.length ?? 'no result field');
+      console.log('  Moralis NFT raw sample:', JSON.stringify(data.result?.[0] || {}));
+
       const nfts = (data.result || []).map(nft => {
         const meta = nft.normalized_metadata || {};
-        const imageUrl = nft.media?.media_collection?.medium?.url
+        // Try all possible image locations Moralis provides
+        const rawImage = nft.media?.media_collection?.medium?.url
           || nft.media?.original_media_url
           || meta.image
+          || nft.token_uri
           || '';
+        const imageUrl = rawImage.startsWith('ipfs://')
+          ? `https://ipfs.io/ipfs/${rawImage.replace('ipfs://', '')}`
+          : rawImage;
         return {
           id: `${nft.token_address}-${nft.token_id}`,
-          name: meta.name || nft.name || 'Monad NFT',
-          image: imageUrl.startsWith('ipfs://')
-            ? `https://ipfs.io/ipfs/${imageUrl.replace('ipfs://', '')}`
-            : imageUrl,
+          name: meta.name || nft.name || `Monad NFT #${nft.token_id}`,
+          image: imageUrl,
           collection: nft.name || 'Monad Collection',
           chain: 'monad',
           contractAddress: nft.token_address,
