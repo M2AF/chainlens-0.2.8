@@ -412,19 +412,20 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
         }
       }
 
-      // ERC20 tokens — log everything Moralis returns so we can debug
-      console.log('  Raw ERC20 data from Moralis:', JSON.stringify(erc20Data.result || []));
-      const erc20Tokens = await Promise.all((erc20Data.result || []).map(async (t) => {
+      // ERC20 tokens — Moralis first, then RPC fallback for unindexed tokens
+      const MONAD_RPC = 'https://monad-mainnet.drpc.org';
+      const ERC20_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+      const moralisResult = erc20Data.result || [];
+      console.log(`  Moralis returned ${moralisResult.length} ERC20 tokens`);
+
+      // Process whatever Moralis did return
+      const moralisTokens = await Promise.all(moralisResult.map(async (t) => {
         const decimals = parseInt(t.decimals) ?? 18;
-        // Moralis v2.2 often provides balance_formatted as a human-readable float
         const balance = t.balance_formatted
           ? parseFloat(t.balance_formatted)
           : parseInt(t.balance || '0', 10) / Math.pow(10, decimals);
-        console.log(`  ERC20: ${t.symbol} | raw=${t.balance} | formatted=${t.balance_formatted} | decimals=${t.decimals} | parsed=${balance}`);
-        if (!balance || balance < 0.000001) {
-          console.log(`  Filtered out ${t.symbol} — balance too low or zero`);
-          return null;
-        }
+        if (!balance || balance < 0.000001) return null;
         const usdPrice = await fetchUSDPrice('monad', t.token_address);
         return {
           id: t.token_address,
@@ -439,7 +440,92 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
           address: t.token_address
         };
       }));
-      tokens.push(...erc20Tokens.filter(t => t !== null));
+      tokens.push(...moralisTokens.filter(t => t !== null));
+
+      // RPC fallback — scan Transfer logs to catch tokens Moralis hasn't indexed yet
+      console.log('  Running Monad RPC fallback for unindexed ERC20 tokens...');
+      const knownAddresses = new Set(moralisResult.map(t => t.token_address?.toLowerCase()));
+      try {
+        const paddedAddress = '0x000000000000000000000000' + address.slice(2).toLowerCase();
+        const logsRes = await fetch(MONAD_RPC, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1, method: 'eth_getLogs',
+            params: [{ topics: [ERC20_TRANSFER_TOPIC, null, paddedAddress], fromBlock: '0x0', toBlock: 'latest' }]
+          })
+        });
+        const logsData = await logsRes.json();
+        const logs = logsData.result || [];
+        console.log(`  Found ${logs.length} inbound Transfer logs via RPC`);
+
+        const newContracts = [...new Set(
+          logs.map(l => l.address?.toLowerCase()).filter(a => a && !knownAddresses.has(a))
+        )];
+        console.log(`  ${newContracts.length} new contract addresses to query`);
+
+        const decodeString = (hex) => {
+          if (!hex || hex === '0x') return '';
+          try {
+            const clean = hex.slice(2);
+            const len = parseInt(clean.slice(64, 128), 16);
+            const str = clean.slice(128, 128 + len * 2);
+            return Buffer.from(str, 'hex').toString('utf8').replace(/\0/g, '');
+          } catch { return ''; }
+        };
+
+        const rpcTokens = await Promise.all(newContracts.slice(0, 20).map(async (contractAddr) => {
+          try {
+            const makeCall = (data) => JSON.stringify({
+              jsonrpc: '2.0', method: 'eth_call',
+              params: [{ to: contractAddr, data }, 'latest'], id: 1
+            });
+            const balanceData  = '0x70a08231' + '000000000000000000000000' + address.slice(2).toLowerCase();
+            const decimalsData = '0x313ce567';
+            const symbolData   = '0x95d89b41';
+            const nameData     = '0x06fdde03';
+
+            const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+            const [balRes, decRes, symRes, nameRes] = await Promise.all([
+              fetch(MONAD_RPC, { ...opts, body: makeCall(balanceData) }).then(r => r.json()),
+              fetch(MONAD_RPC, { ...opts, body: makeCall(decimalsData) }).then(r => r.json()),
+              fetch(MONAD_RPC, { ...opts, body: makeCall(symbolData) }).then(r => r.json()),
+              fetch(MONAD_RPC, { ...opts, body: makeCall(nameData) }).then(r => r.json()),
+            ]);
+
+            const rawBalance = balRes.result && balRes.result !== '0x' ? BigInt(balRes.result) : 0n;
+            if (rawBalance === 0n) return null;
+
+            const decimals = decRes.result && decRes.result !== '0x' ? parseInt(decRes.result, 16) : 18;
+            const symbol   = decodeString(symRes.result) || 'UNKNOWN';
+            const name     = decodeString(nameRes.result) || symbol;
+            const balance  = Number(rawBalance) / Math.pow(10, decimals);
+
+            if (balance < 0.000001) return null;
+            console.log(`  RPC found: ${symbol} balance=${balance}`);
+
+            const usdPrice = await fetchUSDPrice('monad', contractAddr);
+            return {
+              id: contractAddr,
+              name,
+              symbol,
+              balance: balance.toFixed(4),
+              usdPrice,
+              totalValue: (balance * usdPrice).toFixed(2),
+              image: `https://via.placeholder.com/400/836EF9/ffffff?text=${symbol}`,
+              chain: 'monad',
+              isToken: true,
+              address: contractAddr
+            };
+          } catch (e) {
+            console.error(`  RPC token lookup failed for ${contractAddr}:`, e.message);
+            return null;
+          }
+        }));
+        tokens.push(...rpcTokens.filter(t => t !== null));
+      } catch (e) {
+        console.error('  Monad RPC log scan failed:', e.message);
+      }
 
       console.log(`✅ Monad: Found ${tokens.length} tokens via Moralis`);
       res.json({ nfts: tokens });
