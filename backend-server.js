@@ -19,7 +19,8 @@ const API_KEYS = {
   dexhunter: process.env.DEXHUNTER_PARTNER_ID,
   jupiter: process.env.JUPITER_API_KEY, 
   uniswap: process.env.UNISWAP_API_KEY,
-  zerion: process.env.ZERION_KEY
+  zerion: process.env.ZERION_KEY,
+  moralis: process.env.MORALIS_KEY 
 };
 
 // --- Price Discovery Helper ---
@@ -80,11 +81,9 @@ app.get('/api/resolve/ens/:name', async (req, res) => {
 
 // 3. ADA Handle Resolution (Cardano) - REPAIRED
 app.get('/api/resolve/handle/:handle', async (req, res) => {
-  // Normalize: Strip $ and convert to lowercase as per Cardano standards
   let handle = req.params.handle.replace('$', '').toLowerCase();
   
   try {
-    // Attempt 1: Official Handle.me API lookup
     const handleRes = await fetch(`https://api.handle.me/lookup/${handle}`);
     if (handleRes.ok) {
       const handleData = await handleRes.json();
@@ -93,8 +92,6 @@ app.get('/api/resolve/handle/:handle', async (req, res) => {
       }
     }
 
-    // Attempt 2: Manual Fallback via Blockfrost (Using ADA Handle Policy ID)
-    // Policy ID for Mainnet ADA Handles: f0ff48bbb7bbe9d59a40f1ce90e9e9d0ff5002ec48f232b49ca0fb9a
     const policyId = "f0ff48bbb7bbe9d59a40f1ce90e9e9d0ff5002ec48f232b49ca0fb9a";
     const assetNameHex = Buffer.from(handle).toString('hex');
     const assetId = policyId + assetNameHex;
@@ -105,7 +102,6 @@ app.get('/api/resolve/handle/:handle', async (req, res) => {
     
     if (bfRes.ok) {
       const bfData = await bfRes.json();
-      // Blockfrost returns an array: [{ address: "addr1...", quantity: "1" }]
       if (bfData && bfData.length > 0 && bfData[0].address) {
         return res.json({ address: bfData[0].address });
       }
@@ -306,7 +302,6 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
 };
 
 // --- Routes ---
-// Alchemy-supported chains confirmed from their API documentation
 const evmChains = [
   { id: 'ethereum', net: 'eth-mainnet' },
   { id: 'base', net: 'base-mainnet' },
@@ -320,9 +315,7 @@ const evmChains = [
   { id: 'apechain', net: 'apechain-mainnet' },
   { id: 'soneium', net: 'soneium-mainnet' },
   { id: 'ronin', net: 'ronin-mainnet' },
-  { id: 'worldchain', net: 'worldchain-mainnet' } // World Mobile Chain
-  // Note: Sui is non-EVM and requires separate Sui RPC API
-  // Note: MegaETH, HyperEVM may require verification with Alchemy
+  { id: 'worldchain', net: 'worldchain-mainnet' } 
 ];
 
 evmChains.forEach(chain => {
@@ -345,79 +338,106 @@ evmChains.forEach(chain => {
   });
 });
 
-// --- Monad (via Zerion API) ---
+// --- Monad (via Moralis API) ---
 app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
   const { mode, address } = req.params;
   try {
-    console.log(`📡 Fetching Monad ${mode} for ${address} via Zerion...`);
+    console.log(`📡 Fetching Monad ${mode} for ${address} via Moralis...`);
     
-    const response = await fetch(`https://api.zerion.io/v1/wallets/${address}/positions/?currency=usd&filter[chain_ids]=monad-devnet&filter[positions]=only_simple&sort=value`, {
+    const endpoint = mode === 'tokens' ? 'erc20' : 'nft';
+    const response = await fetch(`https://deep-index.moralis.io/api/v2.2/${address}/${endpoint}?chain=monad`, {
       headers: {
-        'Authorization': `Basic ${Buffer.from(API_KEYS.zerion + ':').toString('base64')}`,
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'X-API-Key': API_KEYS.moralis
       }
     });
 
     if (!response.ok) {
-      console.error(`❌ Zerion API error: ${response.status}`);
+      console.error(`❌ Moralis API error: ${response.status}`);
       return res.json({ nfts: [] });
     }
 
     const data = await response.json();
-    const positions = data.data || [];
-    console.log(`✅ Found ${positions.length} positions on Monad`);
 
     if (mode === 'tokens') {
-      // Filter for fungible tokens
-      const tokens = positions
-        .filter(p => p.attributes?.fungible_info && parseFloat(p.attributes.quantity?.float || 0) > 0)
-        .map(p => {
-          const info = p.attributes.fungible_info;
-          const quantity = parseFloat(p.attributes.quantity?.float || 0);
-          const price = parseFloat(p.attributes.price || 0);
-          
-          return {
-            id: info.implementations?.[0]?.address || p.id,
-            name: info.name || 'Unknown Token',
-            symbol: info.symbol || '???',
-            balance: quantity.toFixed(4),
-            usdPrice: price,
-            totalValue: (quantity * price).toFixed(2),
-            image: info.icon?.url || 'https://via.placeholder.com/400/836EF9/ffffff?text=MON',
-            chain: 'monad',
-            isToken: true
-          };
-        })
-        .filter(t => parseFloat(t.balance) > 0);
-
-      res.json({ nfts: tokens });
-    } else {
-      // Filter for NFTs
-      const nfts = positions
-        .filter(p => p.attributes?.nft_info)
-        .map(p => {
-          const info = p.attributes.nft_info;
-          
-          return {
-            id: `${info.contract_address}-${info.token_id}`,
-            name: info.name || 'Monad NFT',
-            image: info.content?.preview?.url || info.content?.detail?.url || 'https://via.placeholder.com/400/836EF9/ffffff?text=NFT',
-            collection: info.collection?.name || 'Monad Collection',
-            chain: 'monad',
-            contractAddress: info.contract_address,
-            tokenId: info.token_id,
-            isToken: false,
-            metadata: {
-              traits: info.attributes || [],
-              description: info.description || ''
-            }
-          };
+      // 1. Fetch Native MON Balance
+      let nativeBalance = 0;
+      try {
+        const nativeRes = await fetch(`https://deep-index.moralis.io/api/v2.2/${address}/balance?chain=monad`, {
+          headers: { 'Accept': 'application/json', 'X-API-Key': API_KEYS.moralis }
         });
+        if (nativeRes.ok) {
+          const nativeData = await nativeRes.json();
+          nativeBalance = parseFloat(nativeData.balance) / 1e18;
+        }
+      } catch (e) { console.error("Native fetch failed", e); }
+
+      const tokens = [];
+      if (nativeBalance > 0) {
+        tokens.push({
+          id: 'native',
+          name: 'Monad',
+          symbol: 'MON',
+          balance: nativeBalance.toFixed(4),
+          usdPrice: 0, 
+          totalValue: '0.00',
+          image: 'https://via.placeholder.com/400/836EF9/ffffff?text=MON',
+          chain: 'monad',
+          isToken: true
+        });
+      }
+
+      // 2. Fetch ERC20 Balances
+      const balances = data || [];
+      const erc20Tokens = await Promise.all(balances.map(async (t) => {
+        const balanceNum = parseFloat(t.balance) / Math.pow(10, t.decimals || 18);
+        const usdPrice = await fetchUSDPrice('monad', t.token_address);
+        
+        return {
+          id: t.token_address,
+          name: t.name || 'Unknown Token',
+          symbol: t.symbol || '???',
+          balance: balanceNum.toFixed(4),
+          usdPrice: usdPrice,
+          totalValue: (balanceNum * usdPrice).toFixed(2),
+          image: t.logo || t.thumbnail || 'https://via.placeholder.com/400/836EF9/ffffff?text=MON',
+          chain: 'monad',
+          isToken: true
+        };
+      }));
+
+      res.json({ nfts: [...tokens, ...erc20Tokens.filter(t => parseFloat(t.balance) > 0)] });
+    } else {
+      // Fetch NFTs
+      const results = data.result || [];
+      const nfts = results.map(nft => {
+        let meta = nft.metadata;
+        if (typeof meta === 'string') {
+          try { meta = JSON.parse(meta); } catch(e) { meta = {}; }
+        } else if (!meta) { meta = {}; }
+
+        let imageUri = meta.image || meta.image_url || nft.token_uri || 'https://via.placeholder.com/400/836EF9/ffffff?text=NFT';
+        if (imageUri.startsWith('ipfs://')) {
+          imageUri = imageUri.replace('ipfs://', 'https://ipfs.io/ipfs/');
+        }
+
+        return {
+          id: `${nft.token_address}-${nft.token_id}`,
+          name: meta.name || nft.name || 'Monad NFT',
+          image: imageUri,
+          collection: nft.symbol || nft.name || 'Monad Collection',
+          chain: 'monad',
+          contractAddress: nft.token_address,
+          tokenId: nft.token_id,
+          isToken: false,
+          metadata: { traits: meta.attributes || [], description: meta.description || '' }
+        };
+      });
 
       res.json({ nfts });
     }
   } catch (err) {
-    console.error('❌ Monad Zerion error:', err);
+    console.error('❌ Monad Moralis error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -471,7 +491,6 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
 });
 
 // --- Cardano ---
-// Helper: Resolve ADA Handle to Address
 const resolveAdaHandle = async (handle) => {
   const cleanHandle = handle.replace('$', '').toLowerCase();
   try {
@@ -550,23 +569,15 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
 });
 
 // --- DIA Market Data Routes ---
-// Top 100 cryptocurrencies with live prices
 app.get('/api/market/top100', async (req, res) => {
   console.log('📊 Fetching top 100 market data...');
-  
   try {
-    // Use CoinGecko as it's more reliable than DIA for batch data
     const response = await fetch(
       'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h'
     );
-    
-    if (!response.ok) {
-      throw new Error(`CoinGecko API error: ${response.status}`);
-    }
-    
+    if (!response.ok) throw new Error(`CoinGecko API error: ${response.status}`);
     const data = await response.json();
     console.log(`✅ Fetched ${data.length} coins from CoinGecko`);
-    
     res.json(data);
   } catch (err) {
     console.error('❌ Market data error:', err.message);
@@ -574,13 +585,10 @@ app.get('/api/market/top100', async (req, res) => {
   }
 });
 
-// Search for specific coin using DIA
 app.get('/api/market/search/:query', async (req, res) => {
   const query = req.params.query.toUpperCase();
   console.log(`🔍 Searching for: ${query}`);
-  
   try {
-    // Try DIA first
     const diaResponse = await fetch(`https://api.diadata.org/v1/quotation/${query}`);
     const diaData = await diaResponse.json();
     
@@ -590,12 +598,11 @@ app.get('/api/market/search/:query', async (req, res) => {
         symbol: diaData.Symbol,
         name: diaData.Name || query,
         price: diaData.Price,
-        change_24h: 0, // DIA doesn't provide 24h change in this endpoint
+        change_24h: 0,
         source: 'DIA',
         time: diaData.Time
       });
     } else {
-      // Fallback to CoinGecko search
       console.log(`⚠️ DIA failed for ${query}, trying CoinGecko...`);
       const cgResponse = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${query.toLowerCase()}`);
       const cgData = await cgResponse.json();
@@ -620,54 +627,23 @@ app.get('/api/market/search/:query', async (req, res) => {
   }
 });
 
-// Get historical chart data (7 days)
 app.get('/api/market/chart/:coinIdOrSymbol', async (req, res) => {
   const input = req.params.coinIdOrSymbol.toLowerCase();
   console.log(`📈 Fetching chart for: ${input}`);
   
-  // Symbol to CoinGecko ID mapping for top coins
   const symbolToId = {
-    'btc': 'bitcoin',
-    'eth': 'ethereum',
-    'usdt': 'tether',
-    'bnb': 'binancecoin',
-    'sol': 'solana',
-    'usdc': 'usd-coin',
-    'xrp': 'ripple',
-    'doge': 'dogecoin',
-    'ton': 'the-open-network',
-    'ada': 'cardano',
-    'avax': 'avalanche-2',
-    'shib': 'shiba-inu',
-    'dot': 'polkadot',
-    'link': 'chainlink',
-    'trx': 'tron',
-    'matic': 'matic-network',
-    'dai': 'dai',
-    'ltc': 'litecoin',
-    'bch': 'bitcoin-cash',
-    'uni': 'uniswap',
-    'atom': 'cosmos',
-    'xlm': 'stellar',
-    'okb': 'okb',
-    'icp': 'internet-computer',
-    'fil': 'filecoin',
-    'apt': 'aptos',
-    'hbar': 'hedera-hashgraph',
-    'arb': 'arbitrum',
-    'vet': 'vechain',
-    'near': 'near',
-    'op': 'optimism',
-    'inj': 'injective-protocol',
-    'stx': 'blockstack',
-    'grt': 'the-graph',
-    'ftm': 'fantom',
-    'algo': 'algorand',
-    'aave': 'aave',
-    'etc': 'ethereum-classic'
+    'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+    'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+    'ton': 'the-open-network', 'ada': 'cardano', 'avax': 'avalanche-2', 'shib': 'shiba-inu',
+    'dot': 'polkadot', 'link': 'chainlink', 'trx': 'tron', 'matic': 'matic-network',
+    'dai': 'dai', 'ltc': 'litecoin', 'bch': 'bitcoin-cash', 'uni': 'uniswap',
+    'atom': 'cosmos', 'xlm': 'stellar', 'okb': 'okb', 'icp': 'internet-computer',
+    'fil': 'filecoin', 'apt': 'aptos', 'hbar': 'hedera-hashgraph', 'arb': 'arbitrum',
+    'vet': 'vechain', 'near': 'near', 'op': 'optimism', 'inj': 'injective-protocol',
+    'stx': 'blockstack', 'grt': 'the-graph', 'ftm': 'fantom', 'algo': 'algorand',
+    'aave': 'aave', 'etc': 'ethereum-classic'
   };
   
-  // Try to convert symbol to ID, or use input as-is if it's already an ID
   const coinId = symbolToId[input] || input;
   
   try {
@@ -675,29 +651,16 @@ app.get('/api/market/chart/:coinIdOrSymbol', async (req, res) => {
     const response = await fetch(
       `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=7&interval=hourly`
     );
-    
-    if (!response.ok) {
-      throw new Error(`Chart API error: ${response.status}`);
-    }
-    
+    if (!response.ok) throw new Error(`Chart API error: ${response.status}`);
     const data = await response.json();
+    if (!data.prices || data.prices.length === 0) throw new Error('No price data available');
     
-    if (!data.prices || data.prices.length === 0) {
-      throw new Error('No price data available');
-    }
-    
-    // Format data for frontend
-    const formattedPrices = data.prices.map(([time, price]) => ({
-      time,
-      price
-    }));
-    
+    const formattedPrices = data.prices.map(([time, price]) => ({ time, price }));
     const currentPrice = formattedPrices[formattedPrices.length - 1].price;
     const yesterdayPrice = formattedPrices[formattedPrices.length - 25]?.price || currentPrice;
     const change24h = ((currentPrice - yesterdayPrice) / yesterdayPrice) * 100;
     
     console.log(`✅ Chart data for ${input.toUpperCase()}: ${formattedPrices.length} data points`);
-    
     res.json({
       symbol: input.toUpperCase(),
       name: input.toUpperCase(),
@@ -712,7 +675,7 @@ app.get('/api/market/chart/:coinIdOrSymbol', async (req, res) => {
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-// Validate critical API keys at startup
+
 if (!API_KEYS.alchemy) {
   console.error('⚠️  WARNING: ALCHEMY_KEY not found in .env file!');
   console.error('   EVM chains (Ethereum, Optimism, etc.) will not work without it.');
