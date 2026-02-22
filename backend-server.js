@@ -853,33 +853,45 @@ app.get('/api/market/top100', async (req, res) => {
   }
 });
 
-// Search for specific coin using CoinGecko search API (returns proper slug for charts)
+// Search for specific coin using DIA
 app.get('/api/market/search/:query', async (req, res) => {
-  const query = req.params.query;
-  console.log(`🔍 Searching CoinGecko for: ${query}`);
+  const query = req.params.query.toUpperCase();
+  console.log(`🔍 Searching for: ${query}`);
   
   try {
-    // Step 1: Search for the coin to get its proper CoinGecko slug/id
-    const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
-    const searchData = await searchRes.json();
-    const hit = searchData.coins?.[0];
+    // Try DIA first
+    const diaResponse = await fetch(`https://api.diadata.org/v1/quotation/${query}`);
+    const diaData = await diaResponse.json();
     
-    if (!hit) {
-      return res.status(404).json({ error: 'Coin not found on CoinGecko' });
-    }
-    
-    // Step 2: Fetch full market data using the proper slug
-    const marketRes = await fetch(
-      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
-    );
-    const marketData = await marketRes.json();
-    
-    if (marketData && marketData.length > 0) {
-      const coin = marketData[0];
-      console.log(`✅ Found: ${coin.name} (${coin.id}) $${coin.current_price}`);
-      res.json(coin);
+    if (diaData.Price && diaData.Price > 0) {
+      console.log(`✅ Found ${query} on DIA: $${diaData.Price}`);
+      res.json({
+        symbol: diaData.Symbol,
+        name: diaData.Name || query,
+        price: diaData.Price,
+        change_24h: 0, // DIA doesn't provide 24h change in this endpoint
+        source: 'DIA',
+        time: diaData.Time
+      });
     } else {
-      res.status(404).json({ error: 'No market data found' });
+      // Fallback to CoinGecko search
+      console.log(`⚠️ DIA failed for ${query}, trying CoinGecko...`);
+      const cgResponse = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${query.toLowerCase()}`);
+      const cgData = await cgResponse.json();
+      
+      if (cgData && cgData.length > 0) {
+        const coin = cgData[0];
+        console.log(`✅ Found ${query} on CoinGecko: $${coin.current_price}`);
+        res.json({
+          symbol: coin.symbol.toUpperCase(),
+          name: coin.name,
+          price: coin.current_price,
+          change_24h: coin.price_change_percentage_24h || 0,
+          source: 'CoinGecko'
+        });
+      } else {
+        res.status(404).json({ error: 'Coin not found' });
+      }
     }
   } catch (err) {
     console.error(`❌ Search error for ${query}:`, err.message);
@@ -887,93 +899,44 @@ app.get('/api/market/search/:query', async (req, res) => {
   }
 });
 
-// Get historical chart data (7 days)
-app.get('/api/market/chart/:coinIdOrSymbol', async (req, res) => {
-  const input = req.params.coinIdOrSymbol.toLowerCase();
-  console.log(`📈 Fetching chart for: ${input}`);
-  
-  // Symbol to CoinGecko ID mapping for top coins
-  const symbolToId = {
-    'btc': 'bitcoin',
-    'eth': 'ethereum',
-    'usdt': 'tether',
-    'bnb': 'binancecoin',
-    'sol': 'solana',
-    'usdc': 'usd-coin',
-    'xrp': 'ripple',
-    'doge': 'dogecoin',
-    'ton': 'the-open-network',
-    'ada': 'cardano',
-    'avax': 'avalanche-2',
-    'shib': 'shiba-inu',
-    'dot': 'polkadot',
-    'link': 'chainlink',
-    'trx': 'tron',
-    'matic': 'matic-network',
-    'dai': 'dai',
-    'ltc': 'litecoin',
-    'bch': 'bitcoin-cash',
-    'uni': 'uniswap',
-    'atom': 'cosmos',
-    'xlm': 'stellar',
-    'okb': 'okb',
-    'icp': 'internet-computer',
-    'fil': 'filecoin',
-    'apt': 'aptos',
-    'hbar': 'hedera-hashgraph',
-    'arb': 'arbitrum',
-    'vet': 'vechain',
-    'near': 'near',
-    'op': 'optimism',
-    'inj': 'injective-protocol',
-    'stx': 'blockstack',
-    'grt': 'the-graph',
-    'ftm': 'fantom',
-    'algo': 'algorand',
-    'aave': 'aave',
-    'etc': 'ethereum-classic'
-  };
-  
-  // Try to convert symbol to ID, or use input as-is if it's already an ID
-  const coinId = symbolToId[input] || input;
-  
+// Chart data — server-side cached to avoid browser rate limits on CoinGecko free tier
+const _chartCache = {};
+app.get('/api/market/chart/:coinId', async (req, res) => {
+  const coinId = req.params.coinId.toLowerCase();
+  const days = req.query.days || '7';
+  const cacheKey = `${coinId}-${days}`;
+  const TTL = days === '1' ? 5 * 60 * 1000 : 15 * 60 * 1000; // 5min for 1d, 15min for others
+
+  // Serve from cache if fresh
+  if (_chartCache[cacheKey] && Date.now() - _chartCache[cacheKey].ts < TTL) {
+    console.log(`📊 Chart cache hit: ${cacheKey}`);
+    return res.json(_chartCache[cacheKey].data);
+  }
+
+  console.log(`📈 Fetching chart for ${coinId}, days=${days}`);
   try {
-    console.log(`🔍 Using CoinGecko ID: ${coinId}`);
     const response = await fetch(
-      `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=7&interval=hourly`
+      `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`
     );
-    
+
     if (!response.ok) {
-      throw new Error(`Chart API error: ${response.status}`);
+      const body = await response.text();
+      console.error(`❌ CoinGecko chart ${response.status} for ${coinId}:`, body.slice(0, 100));
+      return res.status(response.status).json({ error: `CoinGecko returned ${response.status}` });
     }
-    
+
     const data = await response.json();
-    
     if (!data.prices || data.prices.length === 0) {
-      throw new Error('No price data available');
+      return res.status(404).json({ error: 'No price data available' });
     }
-    
-    // Format data for frontend
-    const formattedPrices = data.prices.map(([time, price]) => ({
-      time,
-      price
-    }));
-    
-    const currentPrice = formattedPrices[formattedPrices.length - 1].price;
-    const yesterdayPrice = formattedPrices[formattedPrices.length - 25]?.price || currentPrice;
-    const change24h = ((currentPrice - yesterdayPrice) / yesterdayPrice) * 100;
-    
-    console.log(`✅ Chart data for ${input.toUpperCase()}: ${formattedPrices.length} data points`);
-    
-    res.json({
-      symbol: input.toUpperCase(),
-      name: input.toUpperCase(),
-      prices: formattedPrices,
-      current_price: currentPrice,
-      change_24h: change24h
-    });
+
+    const prices = data.prices.map(([time, price]) => ({ time, price }));
+    const result = { coinId, days, prices };
+    _chartCache[cacheKey] = { data: result, ts: Date.now() };
+    console.log(`✅ Chart fetched for ${coinId}: ${prices.length} points`);
+    res.json(result);
   } catch (err) {
-    console.error(`❌ Chart error for ${input}:`, err.message);
+    console.error(`❌ Chart error for ${coinId}:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
