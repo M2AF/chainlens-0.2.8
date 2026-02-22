@@ -853,125 +853,281 @@ app.get('/api/market/top100', async (req, res) => {
   }
 });
 
-// Search for specific coin using CoinGecko search API (returns proper slug for charts)
+// Enhanced search with Kraken and Gemini fallback
 app.get('/api/market/search/:query', async (req, res) => {
   const query = req.params.query;
-  console.log(`🔍 Searching CoinGecko for: ${query}`);
+  console.log(`🔍 Searching for: ${query}`);
   
   try {
-    // Step 1: Search for the coin to get its proper CoinGecko slug/id
+    // Step 1: Try CoinGecko search (most comprehensive)
+    console.log('  📊 Trying CoinGecko...');
     const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
     const searchData = await searchRes.json();
     const hit = searchData.coins?.[0];
     
-    if (!hit) {
-      return res.status(404).json({ error: 'Coin not found on CoinGecko' });
+    if (hit) {
+      const marketRes = await fetch(
+        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
+      );
+      const marketData = await marketRes.json();
+      
+      if (marketData && marketData.length > 0) {
+        const coin = marketData[0];
+        console.log(`  ✅ CoinGecko: ${coin.name} (${coin.id}) $${coin.current_price}`);
+        return res.json({
+          ...coin,
+          source: 'CoinGecko',
+          symbol: coin.symbol.toUpperCase()
+        });
+      }
     }
     
-    // Step 2: Fetch full market data using the proper slug
-    const marketRes = await fetch(
-      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
-    );
-    const marketData = await marketRes.json();
+    // Step 2: Try Kraken
+    console.log('  🐙 Trying Kraken...');
+    const krakenSymbol = query.toUpperCase() + 'USD';
+    const krakenRes = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${krakenSymbol}`);
+    const krakenData = await krakenRes.json();
     
-    if (marketData && marketData.length > 0) {
-      const coin = marketData[0];
-      console.log(`✅ Found: ${coin.name} (${coin.id}) $${coin.current_price}`);
-      res.json(coin);
-    } else {
-      res.status(404).json({ error: 'No market data found' });
+    if (krakenData.result && Object.keys(krakenData.result).length > 0) {
+      const pairKey = Object.keys(krakenData.result)[0];
+      const ticker = krakenData.result[pairKey];
+      const price = parseFloat(ticker.c[0]); // Last trade closed price
+      const high24h = parseFloat(ticker.h[1]); // High last 24h
+      const low24h = parseFloat(ticker.l[1]); // Low last 24h
+      const volume24h = parseFloat(ticker.v[1]); // Volume last 24h
+      const change24h = ((price - parseFloat(ticker.o)) / parseFloat(ticker.o)) * 100;
+      
+      console.log(`  ✅ Kraken: ${query.toUpperCase()} $${price}`);
+      return res.json({
+        id: query.toLowerCase(),
+        symbol: query.toUpperCase(),
+        name: query.toUpperCase(),
+        current_price: price,
+        price_change_percentage_24h: change24h,
+        high_24h: high24h,
+        low_24h: low24h,
+        total_volume: volume24h,
+        market_cap: 0,
+        market_cap_rank: null,
+        image: `https://cryptoicons.org/api/icon/${query.toLowerCase()}/50`,
+        sparkline_in_7d: null,
+        source: 'Kraken'
+      });
     }
+    
+    // Step 3: Try Gemini
+    console.log('  💎 Trying Gemini...');
+    const geminiSymbol = query.toLowerCase() + 'usd';
+    const geminiRes = await fetch(`https://api.gemini.com/v1/pubticker/${geminiSymbol}`);
+    
+    if (geminiRes.ok) {
+      const geminiData = await geminiRes.json();
+      const price = parseFloat(geminiData.last);
+      const change = parseFloat(geminiData.change || 0);
+      const volume = parseFloat(geminiData.volume?.[query.toUpperCase()] || 0);
+      
+      console.log(`  ✅ Gemini: ${query.toUpperCase()} $${price}`);
+      return res.json({
+        id: query.toLowerCase(),
+        symbol: query.toUpperCase(),
+        name: query.toUpperCase(),
+        current_price: price,
+        price_change_percentage_24h: change,
+        high_24h: 0,
+        low_24h: 0,
+        total_volume: volume,
+        market_cap: 0,
+        market_cap_rank: null,
+        image: `https://cryptoicons.org/api/icon/${query.toLowerCase()}/50`,
+        sparkline_in_7d: null,
+        source: 'Gemini'
+      });
+    }
+    
+    // Step 4: No results from any source
+    console.log(`  ❌ Not found on any exchange`);
+    return res.status(404).json({ error: `Coin "${query}" not found on any supported exchange` });
+    
   } catch (err) {
     console.error(`❌ Search error for ${query}:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get historical chart data (7 days)
+// Enhanced chart with multiple timeframes and Kraken/Gemini fallback
 app.get('/api/market/chart/:coinIdOrSymbol', async (req, res) => {
   const input = req.params.coinIdOrSymbol.toLowerCase();
-  console.log(`📈 Fetching chart for: ${input}`);
+  const timeframe = req.query.timeframe || '7d'; // 1d, 7d, 1m, 1y, all
+  console.log(`📈 Fetching chart for: ${input} (${timeframe})`);
   
-  // Symbol to CoinGecko ID mapping for top coins
+  // Symbol to CoinGecko ID mapping
   const symbolToId = {
-    'btc': 'bitcoin',
-    'eth': 'ethereum',
-    'usdt': 'tether',
-    'bnb': 'binancecoin',
-    'sol': 'solana',
-    'usdc': 'usd-coin',
-    'xrp': 'ripple',
-    'doge': 'dogecoin',
-    'ton': 'the-open-network',
-    'ada': 'cardano',
-    'avax': 'avalanche-2',
-    'shib': 'shiba-inu',
-    'dot': 'polkadot',
-    'link': 'chainlink',
-    'trx': 'tron',
-    'matic': 'matic-network',
-    'dai': 'dai',
-    'ltc': 'litecoin',
-    'bch': 'bitcoin-cash',
-    'uni': 'uniswap',
-    'atom': 'cosmos',
-    'xlm': 'stellar',
-    'okb': 'okb',
-    'icp': 'internet-computer',
-    'fil': 'filecoin',
-    'apt': 'aptos',
-    'hbar': 'hedera-hashgraph',
-    'arb': 'arbitrum',
-    'vet': 'vechain',
-    'near': 'near',
-    'op': 'optimism',
-    'inj': 'injective-protocol',
-    'stx': 'blockstack',
-    'grt': 'the-graph',
-    'ftm': 'fantom',
-    'algo': 'algorand',
-    'aave': 'aave',
-    'etc': 'ethereum-classic'
+    'btc': 'bitcoin', 'eth': 'ethereum', 'usdt': 'tether', 'bnb': 'binancecoin',
+    'sol': 'solana', 'usdc': 'usd-coin', 'xrp': 'ripple', 'doge': 'dogecoin',
+    'ton': 'the-open-network', 'ada': 'cardano', 'avax': 'avalanche-2',
+    'shib': 'shiba-inu', 'dot': 'polkadot', 'link': 'chainlink', 'trx': 'tron',
+    'matic': 'matic-network', 'dai': 'dai', 'ltc': 'litecoin', 'bch': 'bitcoin-cash',
+    'uni': 'uniswap', 'atom': 'cosmos', 'xlm': 'stellar', 'okb': 'okb',
+    'icp': 'internet-computer', 'fil': 'filecoin', 'apt': 'aptos',
+    'hbar': 'hedera-hashgraph', 'arb': 'arbitrum', 'vet': 'vechain',
+    'near': 'near', 'op': 'optimism', 'inj': 'injective-protocol',
+    'stx': 'blockstack', 'grt': 'the-graph', 'ftm': 'fantom',
+    'algo': 'algorand', 'aave': 'aave', 'etc': 'ethereum-classic',
+    'mon': 'monad', 'monad': 'monad'
   };
   
-  // Try to convert symbol to ID, or use input as-is if it's already an ID
   const coinId = symbolToId[input] || input;
   
+  // Timeframe configuration
+  const getTimeframeConfig = (tf) => {
+    switch(tf) {
+      case '1d':
+        return { days: 1, binanceInterval: '5m', binanceLimit: 288, krakenInterval: 5, geminiTimeframe: '5m' };
+      case '7d':
+        return { days: 7, binanceInterval: '1h', binanceLimit: 168, krakenInterval: 60, geminiTimeframe: '1hr' };
+      case '1m':
+        return { days: 30, binanceInterval: '4h', binanceLimit: 180, krakenInterval: 240, geminiTimeframe: '6hr' };
+      case '1y':
+        return { days: 365, binanceInterval: '1d', binanceLimit: 365, krakenInterval: 1440, geminiTimeframe: '1day' };
+      case 'all':
+        return { days: 'max', binanceInterval: '1w', binanceLimit: 520, krakenInterval: 10080, geminiTimeframe: '1day' };
+      default:
+        return { days: 7, binanceInterval: '1h', binanceLimit: 168, krakenInterval: 60, geminiTimeframe: '1hr' };
+    }
+  };
+  
+  const config = getTimeframeConfig(timeframe);
+  
   try {
-    console.log(`🔍 Using CoinGecko ID: ${coinId}`);
-    const response = await fetch(
-      `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=7&interval=hourly`
-    );
+    // Step 1: Try Binance (best for crypto-to-crypto pairs)
+    console.log('  📊 Trying Binance...');
+    const binanceSymbol = input.toUpperCase() + 'USDT';
+    const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${config.binanceInterval}&limit=${config.binanceLimit}`;
+    const binanceRes = await fetch(binanceUrl);
     
-    if (!response.ok) {
-      throw new Error(`Chart API error: ${response.status}`);
+    if (binanceRes.ok) {
+      const binanceData = await binanceRes.json();
+      if (binanceData && binanceData.length > 0) {
+        const formattedPrices = binanceData.map(k => ({
+          time: k[0],
+          price: parseFloat(k[4]) // closing price
+        }));
+        
+        const currentPrice = formattedPrices[formattedPrices.length - 1].price;
+        const startPrice = formattedPrices[0].price;
+        const change = ((currentPrice - startPrice) / startPrice) * 100;
+        
+        console.log(`  ✅ Binance: ${formattedPrices.length} data points`);
+        return res.json({
+          symbol: input.toUpperCase(),
+          name: input.toUpperCase(),
+          prices: formattedPrices,
+          current_price: currentPrice,
+          change_24h: change,
+          source: 'Binance',
+          timeframe: timeframe
+        });
+      }
     }
     
-    const data = await response.json();
+    // Step 2: Try Kraken
+    console.log('  🐙 Trying Kraken...');
+    const krakenSymbol = input.toUpperCase() + 'USD';
+    const krakenUrl = `https://api.kraken.com/0/public/OHLC?pair=${krakenSymbol}&interval=${config.krakenInterval}`;
+    const krakenRes = await fetch(krakenUrl);
+    const krakenData = await krakenRes.json();
     
-    if (!data.prices || data.prices.length === 0) {
-      throw new Error('No price data available');
+    if (krakenData.result && Object.keys(krakenData.result).length > 0) {
+      const pairKey = Object.keys(krakenData.result).find(k => k !== 'last');
+      if (pairKey) {
+        const ohlcData = krakenData.result[pairKey];
+        const formattedPrices = ohlcData.slice(-config.binanceLimit).map(candle => ({
+          time: candle[0] * 1000, // Convert to milliseconds
+          price: parseFloat(candle[4]) // closing price
+        }));
+        
+        const currentPrice = formattedPrices[formattedPrices.length - 1].price;
+        const startPrice = formattedPrices[0].price;
+        const change = ((currentPrice - startPrice) / startPrice) * 100;
+        
+        console.log(`  ✅ Kraken: ${formattedPrices.length} data points`);
+        return res.json({
+          symbol: input.toUpperCase(),
+          name: input.toUpperCase(),
+          prices: formattedPrices,
+          current_price: currentPrice,
+          change_24h: change,
+          source: 'Kraken',
+          timeframe: timeframe
+        });
+      }
     }
     
-    // Format data for frontend
-    const formattedPrices = data.prices.map(([time, price]) => ({
-      time,
-      price
-    }));
+    // Step 3: Try Gemini
+    console.log('  💎 Trying Gemini...');
+    const geminiSymbol = input.toLowerCase() + 'usd';
+    const geminiUrl = `https://api.gemini.com/v2/candles/${geminiSymbol}/${config.geminiTimeframe}`;
+    const geminiRes = await fetch(geminiUrl);
     
-    const currentPrice = formattedPrices[formattedPrices.length - 1].price;
-    const yesterdayPrice = formattedPrices[formattedPrices.length - 25]?.price || currentPrice;
-    const change24h = ((currentPrice - yesterdayPrice) / yesterdayPrice) * 100;
+    if (geminiRes.ok) {
+      const geminiData = await geminiRes.json();
+      if (geminiData && geminiData.length > 0) {
+        const formattedPrices = geminiData.slice(-config.binanceLimit).reverse().map(candle => ({
+          time: candle[0],
+          price: parseFloat(candle[4]) // closing price
+        }));
+        
+        const currentPrice = formattedPrices[formattedPrices.length - 1].price;
+        const startPrice = formattedPrices[0].price;
+        const change = ((currentPrice - startPrice) / startPrice) * 100;
+        
+        console.log(`  ✅ Gemini: ${formattedPrices.length} data points`);
+        return res.json({
+          symbol: input.toUpperCase(),
+          name: input.toUpperCase(),
+          prices: formattedPrices,
+          current_price: currentPrice,
+          change_24h: change,
+          source: 'Gemini',
+          timeframe: timeframe
+        });
+      }
+    }
     
-    console.log(`✅ Chart data for ${input.toUpperCase()}: ${formattedPrices.length} data points`);
+    // Step 4: Try CoinGecko (fallback for all coins)
+    console.log('  🦎 Trying CoinGecko...');
+    const cgUrl = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${config.days}`;
+    const cgRes = await fetch(cgUrl);
     
-    res.json({
-      symbol: input.toUpperCase(),
-      name: input.toUpperCase(),
-      prices: formattedPrices,
-      current_price: currentPrice,
-      change_24h: change24h
-    });
+    if (cgRes.ok) {
+      const cgData = await cgRes.json();
+      if (cgData.prices && cgData.prices.length > 0) {
+        const formattedPrices = cgData.prices.map(([time, price]) => ({
+          time,
+          price
+        }));
+        
+        const currentPrice = formattedPrices[formattedPrices.length - 1].price;
+        const yesterdayPrice = formattedPrices[formattedPrices.length - 25]?.price || currentPrice;
+        const change = ((currentPrice - yesterdayPrice) / yesterdayPrice) * 100;
+        
+        console.log(`  ✅ CoinGecko: ${formattedPrices.length} data points`);
+        return res.json({
+          symbol: input.toUpperCase(),
+          name: coinId,
+          prices: formattedPrices,
+          current_price: currentPrice,
+          change_24h: change,
+          source: 'CoinGecko',
+          timeframe: timeframe
+        });
+      }
+    }
+    
+    // No data from any source
+    console.log(`  ❌ No chart data available from any source`);
+    return res.status(404).json({ error: `No chart data available for ${input}` });
+    
   } catch (err) {
     console.error(`❌ Chart error for ${input}:`, err.message);
     res.status(500).json({ error: err.message });

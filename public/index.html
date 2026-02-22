@@ -223,41 +223,32 @@
           return;
         }
         
-        // Search CoinGecko — returns proper slug IDs needed for chart API
+        // Use backend API which tries CoinGecko → Kraken → Gemini automatically
         try {
-          console.log('🔍 Searching CoinGecko for:', query);
-          const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
-          const searchData = await searchRes.json();
-          const hit = searchData.coins?.[0];
+          console.log('🔍 Searching for:', query, '(trying CoinGecko, Kraken, Gemini)');
+          const searchRes = await fetch(`/api/market/search/${encodeURIComponent(query)}`);
           
-          if (!hit) {
-            alert('Coin not found on CoinGecko. Try the full name (e.g., "canton network", "monad")');
+          if (!searchRes.ok) {
+            alert(`Coin "${query}" not found on any supported exchange (CoinGecko, Kraken, Gemini). Try searching by full name or ticker symbol.`);
             return;
           }
           
-          console.log('✅ CoinGecko search hit:', hit.id, hit.name, hit.symbol);
+          const coin = await searchRes.json();
+          console.log(`✅ Found on ${coin.source}:`, coin.name || coin.symbol, '$' + coin.current_price);
           
-          // Fetch full market data using the proper CoinGecko slug
-          const detailRes = await fetch(
-            `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
-          );
-          const detailData = await detailRes.json();
+          // Add to market list
+          setMarketData(prev => {
+            // Remove any existing entry with same id/symbol to avoid duplicates
+            const filtered = prev.filter(c => c.id !== coin.id && c.symbol !== coin.symbol);
+            return [coin, ...filtered];
+          });
+          setMarketSearch('');
           
-          if (detailData && detailData.length > 0) {
-            const coin = detailData[0];
-            setMarketData(prev => {
-              // Remove any existing entry with same id to avoid duplicates
-              const filtered = prev.filter(c => c.id !== coin.id);
-              return [coin, ...filtered];
-            });
-            setMarketSearch('');
-            console.log('✅ Added to market list:', coin.name, '$' + coin.current_price);
-          } else {
-            alert('Could not load market data for that coin.');
-          }
+          // Show success message with source
+          console.log(`✅ Added to market list from ${coin.source}:`, coin.name || coin.symbol);
         } catch (e) {
-          console.error('❌ CoinGecko search failed:', e);
-          alert('Search failed. Please try again.');
+          console.error('❌ Search failed:', e);
+          alert('Search failed. Please try again or check the console for details.');
         }
       };
 
@@ -341,36 +332,42 @@
           }
         ];
         
-        // Try each source until one works
-        for (const source of sources) {
-          try {
-            const prices = await source.fetch();
-            
-            if (prices && prices.length > 0) {
-              console.log(`  ✅ Success from ${source.name}:`, prices.length, 'data points');
-              setChartData({
-                symbol: coin.symbol,
-                name: coin.name,
-                prices: prices,
-                current_price: coin.current_price,
-                change_24h: coin.price_change_percentage_24h,
-                source: source.name,
-                timeframe: timeframe,
-                timeframeLabel: params.label
-              });
-              setLoadingChart(false);
-              return; // Success! Exit function
-            }
-          } catch (e) {
-            console.warn(`  ⚠️ ${source.name} failed:`, e.message);
-            // Continue to next source
+        // Use backend API which tries Binance → Kraken → Gemini → CoinGecko automatically
+        try {
+          console.log('  🔄 Using backend API with multi-source fallback...');
+          const coinIdOrSymbol = coin.id || coin.symbol.toLowerCase();
+          const res = await fetch(`/api/market/chart/${coinIdOrSymbol}?timeframe=${timeframe}`);
+          
+          if (!res.ok) {
+            throw new Error(`Backend returned ${res.status}`);
           }
+          
+          const data = await res.json();
+          
+          if (data && data.prices && data.prices.length > 0) {
+            console.log(`  ✅ Success from ${data.source}:`, data.prices.length, 'data points');
+            setChartData({
+              symbol: coin.symbol,
+              name: coin.name,
+              prices: data.prices,
+              current_price: data.current_price,
+              change_24h: data.change_24h,
+              source: data.source,
+              timeframe: timeframe,
+              timeframeLabel: params.label
+            });
+            setLoadingChart(false);
+            return; // Success!
+          }
+          
+          throw new Error('No price data received from backend');
+        } catch (error) {
+          console.error(`  ❌ Backend API failed:`, error.message);
+          setChartData({ 
+            error: `Unable to load chart data: ${error.message}. This coin may not be available on any supported exchange.`
+          });
+          setLoadingChart(false);
         }
-        
-        // All sources failed
-        console.error('❌ All chart sources failed');
-        setChartData({ error: 'Could not load chart data from any source' });
-        setLoadingChart(false);
       };
 
       const filteredMarket = useMemo(() => {
