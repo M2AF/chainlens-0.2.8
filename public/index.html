@@ -206,43 +206,58 @@
         return () => clearInterval(interval);
       }, []);
 
-      // Search function - searches CoinGecko list first, then tries DIA for coins not in top 100
+      // Search by ticker (MON) or name (Monad) — checks loaded list first, then CoinGecko search
       const searchCoin = async (query) => {
         if (!query.trim()) return;
         
-        const q = query.toLowerCase();
-        const existing = marketData.find(c => 
-          c.symbol.toLowerCase() === q || 
-          c.id.toLowerCase() === q ||
-          c.name.toLowerCase() === q
-        );
+        const q = query.toLowerCase().trim();
         
+        // Check loaded list — match on symbol (ticker), id, or name (partial ok for name)
+        const existing = marketData.find(c => 
+          c.symbol.toLowerCase() === q ||           // exact ticker: "mon" → MON
+          c.id.toLowerCase() === q ||               // exact slug: "monad"
+          c.name.toLowerCase() === q ||             // exact name: "monad"
+          c.name.toLowerCase().startsWith(q + ' ') // "monad " prefix to avoid false matches
+        );
         if (existing) {
-          // Coin already in list, just filter
           setMarketSearch(query);
           return;
         }
         
-        // Use backend search which calls CoinGecko /search → gets proper slug → full market data
-        // This avoids browser-side rate limits since the backend caches and throttles separately
+        // Not in loaded list — search CoinGecko which handles both ticker and name queries
+        // CoinGecko /search works for "mon", "monad", "canton", "cc" etc.
         try {
-          console.log('🔍 Searching for:', query);
-          const res = await fetch(`/api/market/search/${encodeURIComponent(query)}`);
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            alert(err.error || 'Coin not found. Try the full name (e.g. "monad", "canton")');
+          console.log('🔍 Searching CoinGecko for:', query);
+          const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
+          const searchData = await searchRes.json();
+          const hit = searchData.coins?.[0];
+          
+          if (!hit) {
+            alert('Coin not found. Try the ticker (e.g. "MON") or full name (e.g. "Monad")');
             return;
           }
-          const coin = await res.json();
-          // Backend returns full CoinGecko market data object with correct id, sparkline etc.
-          console.log('✅ Found:', coin.name, '(' + coin.id + ')', '$' + coin.current_price);
-          setMarketData(prev => {
-            const filtered = prev.filter(c => c.id !== coin.id);
-            return [coin, ...filtered];
-          });
-          setMarketSearch('');
+          
+          console.log('✅ CoinGecko search hit:', hit.id, hit.name, hit.symbol);
+          
+          // Fetch full market data using the correct CoinGecko slug
+          const detailRes = await fetch(
+            `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
+          );
+          const detailData = await detailRes.json();
+          
+          if (detailData && detailData.length > 0) {
+            const coin = detailData[0];
+            setMarketData(prev => {
+              const filtered = prev.filter(c => c.id !== coin.id);
+              return [coin, ...filtered];
+            });
+            setMarketSearch('');
+            console.log('✅ Added to market list:', coin.name, '$' + coin.current_price);
+          } else {
+            alert('Could not load market data for that coin.');
+          }
         } catch (e) {
-          console.error('❌ Search failed:', e);
+          console.error('❌ CoinGecko search failed:', e);
           alert('Search failed. Please try again.');
         }
       };
@@ -301,49 +316,65 @@
         
         const coinCapRange = getCoinCapTimeRange();
         
-        // Try multiple sources for reliability
+        // Chart sources — Binance first (no rate limits), then CoinCap, CoinGecko, CMC as fallbacks
+        // CoinCap uses same slugs as CoinGecko (canton-network, monad, bitcoin etc.)
+        const coinCapId = coin.id || coin.symbol.toLowerCase();
         const sources = [
           {
             name: 'Binance',
             fetch: async () => {
-              console.log('  🔄 Trying Binance API...');
+              console.log('  🔄 Trying Binance with symbol:', symbol);
               const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${params.binanceInterval}&limit=${params.binanceLimit}`);
               if (!res.ok) throw new Error(`Binance returned ${res.status}`);
               const data = await res.json();
-              return data.map(k => ({
-                time: k[0],
-                price: parseFloat(k[4]) // closing price
-              }));
+              if (!Array.isArray(data) || data.length === 0) throw new Error('No kline data');
+              return data.map(k => ({ time: k[0], price: parseFloat(k[4]) }));
             }
           },
           {
             name: 'CoinCap',
             fetch: async () => {
-              // CoinCap slugs match CoinGecko ids: 'canton-network', 'monad', 'bitcoin' etc.
-              const coinCapId = coin.id || coin.symbol.toLowerCase();
-              console.log('  🔄 Trying CoinCap API with id:', coinCapId);
+              // CoinCap is free, no key, and uses CoinGecko-style slugs
+              console.log('  🔄 Trying CoinCap with id:', coinCapId);
               const res = await fetch(`https://api.coincap.io/v2/assets/${coinCapId}/history?interval=${coinCapRange.interval}&start=${coinCapRange.start}&end=${now}`);
               if (!res.ok) throw new Error(`CoinCap returned ${res.status}`);
               const data = await res.json();
-              if (!data.data?.length) throw new Error('Empty CoinCap response');
-              return data.data.map(d => ({
-                time: d.time,
-                price: parseFloat(d.priceUsd)
-              }));
+              if (!data.data?.length) throw new Error('No CoinCap data');
+              return data.data.map(d => ({ time: d.time, price: parseFloat(d.priceUsd) }));
             }
           },
           {
             name: 'CoinGecko',
             fetch: async () => {
-              console.log('  🔄 Trying CoinGecko API with id:', coin.id);
+              console.log('  🔄 Trying CoinGecko with id:', coin.id);
               const res = await fetch(`https://api.coingecko.com/api/v3/coins/${coin.id}/market_chart?vs_currency=usd&days=${params.coinGeckoDays}`);
               if (!res.ok) throw new Error(`CoinGecko returned ${res.status}`);
               const data = await res.json();
-              if (!data.prices?.length) throw new Error('Empty CoinGecko response');
-              return data.prices.map(([time, price]) => ({
-                time,
-                price
-              }));
+              if (!data.prices?.length) throw new Error('No CoinGecko data');
+              return data.prices.map(([time, price]) => ({ time, price }));
+            }
+          },
+          {
+            name: 'CoinMarketCap',
+            fetch: async () => {
+              // CMC public chart endpoint — no API key required, works for most coins
+              console.log('  🔄 Trying CoinMarketCap with symbol:', coin.symbol);
+              const cmcSymbol = coin.symbol.toUpperCase();
+              const daysNum = params.coinGeckoDays === 'max' ? 1825 : parseInt(params.coinGeckoDays);
+              const endTs = Math.floor(Date.now() / 1000);
+              const startTs = endTs - daysNum * 86400;
+              const res = await fetch(
+                `https://api.coinmarketcap.com/data-api/v3/cryptocurrency/historical?symbol=${cmcSymbol}&timeStart=${startTs}&timeEnd=${endTs}&interval=1d`,
+                { headers: { 'Accept': 'application/json' } }
+              );
+              if (!res.ok) throw new Error(`CMC returned ${res.status}`);
+              const data = await res.json();
+              const quotes = data.data?.quotes;
+              if (!quotes?.length) throw new Error('No CMC data');
+              return quotes.map(q => ({
+                time: new Date(q.timeClose).getTime(),
+                price: q.quote?.USD?.close || q.quote?.USD?.price || 0
+              })).filter(p => p.price > 0);
             }
           }
         ];
@@ -961,7 +992,7 @@
                     <div className={`p-8 rounded-[3rem] border transition-all ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-2xl'}`}>
                         <div className="mb-8">
                             <h2 className="text-4xl font-heading font-extrabold uppercase mb-2">Market Watch</h2>
-                            <p className="text-sm opacity-60">Live cryptocurrency market data powered by CoinGecko</p>
+                            <p className="text-sm opacity-60">Live cryptocurrency market data powered by CoinGecko & Binance</p>
                         </div>
                         
                         <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-6">
@@ -984,9 +1015,9 @@
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Data Provider</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">Data Providers</span>
                                 <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${darkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-500/20 text-emerald-600'}`}>CoinGecko</span>
-                                <span className={`px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${darkMode ? 'bg-yellow-500/10 text-yellow-400' : 'bg-yellow-500/20 text-yellow-600'}`}>Binance</span>
+                                <span className={`px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${darkMode ? 'bg-yellow-500/10 text-yellow-600' : 'bg-yellow-500/20 text-yellow-600'}`}>Binance</span>
                             </div>
                         </div>
                         {marketLoading && marketData.length === 0 ? (
