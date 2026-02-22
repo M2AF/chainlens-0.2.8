@@ -853,36 +853,50 @@ app.get('/api/market/top100', async (req, res) => {
   }
 });
 
-// Search for specific coin using CoinGecko search API (returns proper slug for charts)
+// Search endpoint — CoinGecko /search gives us the correct slug,
+// then /coins/markets returns full data the frontend needs (price, rank, sparkline, id)
+// Running server-side avoids browser rate limit issues
+const _searchCache = {};
 app.get('/api/market/search/:query', async (req, res) => {
-  const query = req.params.query;
-  console.log(`🔍 Searching CoinGecko for: ${query}`);
-  
+  const query = req.params.query.trim();
+  console.log(`🔍 Searching for: ${query}`);
+
+  // Cache results for 5 minutes to avoid hammering CoinGecko on repeated searches
+  const cacheKey = query.toLowerCase();
+  if (_searchCache[cacheKey] && Date.now() - _searchCache[cacheKey].ts < 300000) {
+    console.log(`📦 Search cache hit for: ${query}`);
+    return res.json(_searchCache[cacheKey].data);
+  }
+
   try {
-    // Step 1: Search for the coin to get its proper CoinGecko slug/id
-    const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
+    // Step 1: CoinGecko /search — find the correct slug (e.g. 'monad', 'canton-network')
+    // This endpoint has a much higher rate limit than /coins/markets
+    const searchRes = await fetch(
+      `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+    if (!searchRes.ok) throw new Error(`CoinGecko search ${searchRes.status}`);
     const searchData = await searchRes.json();
     const hit = searchData.coins?.[0];
-    
-    if (!hit) {
-      return res.status(404).json({ error: 'Coin not found on CoinGecko' });
-    }
-    
-    // Step 2: Fetch full market data using the proper slug
-    const marketRes = await fetch(
-      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
+    if (!hit) return res.status(404).json({ error: `No coin found for "${query}"` });
+
+    console.log(`🔎 Slug found: ${hit.id} (${hit.name})`);
+
+    // Step 2: Full market data using the correct slug
+    const mktRes = await fetch(
+      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`,
+      { headers: { 'Accept': 'application/json' } }
     );
-    const marketData = await marketRes.json();
-    
-    if (marketData && marketData.length > 0) {
-      const coin = marketData[0];
-      console.log(`✅ Found: ${coin.name} (${coin.id}) $${coin.current_price}`);
-      res.json(coin);
-    } else {
-      res.status(404).json({ error: 'No market data found' });
-    }
+    if (!mktRes.ok) throw new Error(`CoinGecko markets ${mktRes.status}`);
+    const mktData = await mktRes.json();
+    if (!mktData?.length) return res.status(404).json({ error: 'No market data returned' });
+
+    const coin = mktData[0];
+    console.log(`✅ Found: ${coin.name} (${coin.id}) rank #${coin.market_cap_rank} $${coin.current_price}`);
+    _searchCache[cacheKey] = { data: coin, ts: Date.now() };
+    res.json(coin);
   } catch (err) {
-    console.error(`❌ Search error for ${query}:`, err.message);
+    console.error(`❌ Search error for "${query}":`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
