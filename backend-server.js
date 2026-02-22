@@ -853,45 +853,33 @@ app.get('/api/market/top100', async (req, res) => {
   }
 });
 
-// Search for specific coin using DIA
+// Search for specific coin using CoinGecko search API (returns proper slug for charts)
 app.get('/api/market/search/:query', async (req, res) => {
-  const query = req.params.query.toUpperCase();
-  console.log(`🔍 Searching for: ${query}`);
+  const query = req.params.query;
+  console.log(`🔍 Searching CoinGecko for: ${query}`);
   
   try {
-    // Try DIA first
-    const diaResponse = await fetch(`https://api.diadata.org/v1/quotation/${query}`);
-    const diaData = await diaResponse.json();
+    // Step 1: Search for the coin to get its proper CoinGecko slug/id
+    const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
+    const searchData = await searchRes.json();
+    const hit = searchData.coins?.[0];
     
-    if (diaData.Price && diaData.Price > 0) {
-      console.log(`✅ Found ${query} on DIA: $${diaData.Price}`);
-      res.json({
-        symbol: diaData.Symbol,
-        name: diaData.Name || query,
-        price: diaData.Price,
-        change_24h: 0, // DIA doesn't provide 24h change in this endpoint
-        source: 'DIA',
-        time: diaData.Time
-      });
+    if (!hit) {
+      return res.status(404).json({ error: 'Coin not found on CoinGecko' });
+    }
+    
+    // Step 2: Fetch full market data using the proper slug
+    const marketRes = await fetch(
+      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
+    );
+    const marketData = await marketRes.json();
+    
+    if (marketData && marketData.length > 0) {
+      const coin = marketData[0];
+      console.log(`✅ Found: ${coin.name} (${coin.id}) $${coin.current_price}`);
+      res.json(coin);
     } else {
-      // Fallback to CoinGecko search
-      console.log(`⚠️ DIA failed for ${query}, trying CoinGecko...`);
-      const cgResponse = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${query.toLowerCase()}`);
-      const cgData = await cgResponse.json();
-      
-      if (cgData && cgData.length > 0) {
-        const coin = cgData[0];
-        console.log(`✅ Found ${query} on CoinGecko: $${coin.current_price}`);
-        res.json({
-          symbol: coin.symbol.toUpperCase(),
-          name: coin.name,
-          price: coin.current_price,
-          change_24h: coin.price_change_percentage_24h || 0,
-          source: 'CoinGecko'
-        });
-      } else {
-        res.status(404).json({ error: 'Coin not found' });
-      }
+      res.status(404).json({ error: 'No market data found' });
     }
   } catch (err) {
     console.error(`❌ Search error for ${query}:`, err.message);

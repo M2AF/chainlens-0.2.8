@@ -206,50 +206,58 @@
         return () => clearInterval(interval);
       }, []);
 
-      // Search function - searches CoinGecko list first, then tries DIA for coins not in top 100
+      // Search function - searches loaded list first, then CoinGecko search API
       const searchCoin = async (query) => {
         if (!query.trim()) return;
         
-        const q = query.toLowerCase();
+        const q = query.toLowerCase().trim();
+        
+        // Check if already in loaded top-100 list
         const existing = marketData.find(c => 
           c.symbol.toLowerCase() === q || 
           c.id.toLowerCase() === q ||
           c.name.toLowerCase() === q
         );
-        
         if (existing) {
-          // Coin already in list, just filter
           setMarketSearch(query);
           return;
         }
         
-        // Try DIA for coins beyond top 100
+        // Search CoinGecko — returns proper slug IDs needed for chart API
         try {
-          console.log('🔍 Searching DIA for:', query.toUpperCase());
-          const res = await fetch(`https://api.diadata.org/v1/quotation/${query.toUpperCase()}`);
-          const data = await res.json();
+          console.log('🔍 Searching CoinGecko for:', query);
+          const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
+          const searchData = await searchRes.json();
+          const hit = searchData.coins?.[0];
           
-          if (data.Price && data.Price > 0) {
-            console.log('✅ Found on DIA:', data.Name, '$' + data.Price);
-            const newCoin = {
-              id: data.Symbol.toLowerCase(),
-              symbol: data.Symbol,
-              name: data.Name || data.Symbol,
-              current_price: data.Price,
-              price_change_percentage_24h: 0,
-              market_cap: 0,
-              market_cap_rank: 999,
-              image: `https://cryptoicons.org/api/icon/${data.Symbol.toLowerCase()}/50`,
-              sparkline_in_7d: null
-            };
-            setMarketData(prev => [newCoin, ...prev]);
-            setMarketSearch(''); // Clear search to show new coin
+          if (!hit) {
+            alert('Coin not found on CoinGecko. Try the full name (e.g., "canton network", "monad")');
+            return;
+          }
+          
+          console.log('✅ CoinGecko search hit:', hit.id, hit.name, hit.symbol);
+          
+          // Fetch full market data using the proper CoinGecko slug
+          const detailRes = await fetch(
+            `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
+          );
+          const detailData = await detailRes.json();
+          
+          if (detailData && detailData.length > 0) {
+            const coin = detailData[0];
+            setMarketData(prev => {
+              // Remove any existing entry with same id to avoid duplicates
+              const filtered = prev.filter(c => c.id !== coin.id);
+              return [coin, ...filtered];
+            });
+            setMarketSearch('');
+            console.log('✅ Added to market list:', coin.name, '$' + coin.current_price);
           } else {
-            alert('Coin not found. Try the exact symbol (e.g., BTC, ETH, SOL)');
+            alert('Could not load market data for that coin.');
           }
         } catch (e) {
-          console.error('❌ DIA search failed:', e);
-          alert('Coin not found. Try the exact symbol (e.g., BTC, ETH, SOL)');
+          console.error('❌ CoinGecko search failed:', e);
+          alert('Search failed. Please try again.');
         }
       };
 
@@ -307,46 +315,28 @@
         
         const coinCapRange = getCoinCapTimeRange();
         
-        // Try multiple sources for reliability
+        // Try multiple sources for reliability — CoinGecko first (has the right slug), Binance as fallback
         const sources = [
-          {
-            name: 'Binance',
-            fetch: async () => {
-              console.log('  🔄 Trying Binance API...');
-              const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${params.binanceInterval}&limit=${params.binanceLimit}`);
-              if (!res.ok) throw new Error(`Binance returned ${res.status}`);
-              const data = await res.json();
-              return data.map(k => ({
-                time: k[0],
-                price: parseFloat(k[4]) // closing price
-              }));
-            }
-          },
-          {
-            name: 'CoinCap',
-            fetch: async () => {
-              console.log('  🔄 Trying CoinCap API...');
-              const coinCapId = coin.symbol.toLowerCase();
-              const res = await fetch(`https://api.coincap.io/v2/assets/${coinCapId}/history?interval=${coinCapRange.interval}&start=${coinCapRange.start}&end=${now}`);
-              if (!res.ok) throw new Error(`CoinCap returned ${res.status}`);
-              const data = await res.json();
-              return data.data.map(d => ({
-                time: d.time,
-                price: parseFloat(d.priceUsd)
-              }));
-            }
-          },
           {
             name: 'CoinGecko',
             fetch: async () => {
-              console.log('  🔄 Trying CoinGecko API...');
+              console.log('  🔄 Trying CoinGecko API with id:', coin.id);
               const res = await fetch(`https://api.coingecko.com/api/v3/coins/${coin.id}/market_chart?vs_currency=usd&days=${params.coinGeckoDays}`);
               if (!res.ok) throw new Error(`CoinGecko returned ${res.status}`);
               const data = await res.json();
-              return data.prices.map(([time, price]) => ({
-                time,
-                price
-              }));
+              if (!data.prices || data.prices.length === 0) throw new Error('No price data');
+              return data.prices.map(([time, price]) => ({ time, price }));
+            }
+          },
+          {
+            name: 'Binance',
+            fetch: async () => {
+              console.log('  🔄 Trying Binance API with symbol:', symbol);
+              const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${params.binanceInterval}&limit=${params.binanceLimit}`);
+              if (!res.ok) throw new Error(`Binance returned ${res.status}`);
+              const data = await res.json();
+              if (!Array.isArray(data) || data.length === 0) throw new Error('No kline data');
+              return data.map(k => ({ time: k[0], price: parseFloat(k[4]) }));
             }
           }
         ];
