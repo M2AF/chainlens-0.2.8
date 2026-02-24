@@ -648,6 +648,7 @@
           if (activeChains.includes('monad')) {
             nftTasks.push(fetch(`/api/nfts/monad/${targetEvm}`).then(r => r.json()));
             tokenTasks.push(fetch(`/api/tokens/monad/${targetEvm}`).then(r => r.json()));
+            txTasks.push(fetch(`/api/transactions/monad/${targetEvm}`).then(r => r.json()));
           }
         }
 
@@ -715,6 +716,10 @@
           setTransactions(sortedTx);
           
           console.log(`✅ Loaded: ${filtered.length} assets, ${sortedTx.length} transactions`);
+          if (sortedTx.length > 0) {
+            console.log(`📅 First tx: ${new Date(sortedTx[0].timestamp).toLocaleString()} (${sortedTx[0].chain})`);
+            console.log(`📅 Last tx: ${new Date(sortedTx[sortedTx.length-1].timestamp).toLocaleString()} (${sortedTx[sortedTx.length-1].chain})`);
+          }
         } catch (e) {
           console.error("Scan error:", e);
         }

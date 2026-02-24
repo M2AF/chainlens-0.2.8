@@ -1513,6 +1513,137 @@ app.get('/api/transactions/cardano/:address', async (req, res) => {
   }
 });
 
+// Monad transactions using direct RPC (Alchemy doesn't support Monad)
+app.get('/api/transactions/monad/:address', async (req, res) => {
+  const { address } = req.params;
+  console.log(`📜 Fetching Monad transactions for: ${address}`);
+  
+  const MONAD_RPCS = [
+    'https://rpc.monad.xyz',
+    'https://rpc1.monad.xyz',
+    'https://rpc2.monad.xyz',
+  ];
+  
+  const rpcCall = async (method, params) => {
+    for (const rpc of MONAD_RPCS) {
+      try {
+        const res = await fetch(rpc, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+        });
+        const data = await res.json();
+        if (data.result !== undefined) return data.result;
+      } catch (e) { }
+    }
+    return null;
+  };
+  
+  try {
+    const currentBlock = await rpcCall('eth_blockNumber', []);
+    if (!currentBlock) {
+      return res.json({ transactions: [] });
+    }
+    
+    const fromBlock = Math.max(0, parseInt(currentBlock, 16) - 10000);
+    
+    // Get native MON transfers (sent)
+    const sentTxs = await rpcCall('eth_getLogs', [{
+      fromBlock: '0x' + fromBlock.toString(16),
+      toBlock: 'latest',
+      address: null, // All addresses
+      topics: [
+        '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', // Transfer event
+        '0x' + address.slice(2).padStart(64, '0').toLowerCase() // from address
+      ]
+    }]);
+    
+    // Get native MON transfers (received)
+    const receivedTxs = await rpcCall('eth_getLogs', [{
+      fromBlock: '0x' + fromBlock.toString(16),
+      toBlock: 'latest',
+      address: null,
+      topics: [
+        '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+        null, // any from address
+        '0x' + address.slice(2).padStart(64, '0').toLowerCase() // to address
+      ]
+    }]);
+    
+    const allLogs = [...(sentTxs || []), ...(receivedTxs || [])];
+    
+    // Get unique transaction hashes and fetch details
+    const txHashes = [...new Set(allLogs.map(log => log.transactionHash))];
+    
+    const transactions = await Promise.all(
+      txHashes.slice(0, 50).map(async (hash) => {
+        try {
+          const tx = await rpcCall('eth_getTransactionByHash', [hash]);
+          const receipt = await rpcCall('eth_getTransactionReceipt', [hash]);
+          
+          if (!tx || !receipt) return null;
+          
+          const block = await rpcCall('eth_getBlockByNumber', [tx.blockNumber, false]);
+          const timestamp = block?.timestamp ? parseInt(block.timestamp, 16) * 1000 : Date.now();
+          
+          // Determine if sent or received
+          const isSent = tx.from.toLowerCase() === address.toLowerCase();
+          const type = isSent ? 'sent' : 'received';
+          
+          // Calculate value (could be native MON or token)
+          let value = 0;
+          let asset = 'MON';
+          
+          // Check if it's a native transfer
+          if (tx.value && tx.value !== '0x0') {
+            value = parseInt(tx.value, 16) / 1e18;
+            asset = 'MON';
+          } else {
+            // It's a token transfer, parse from logs
+            const transferLog = receipt.logs?.find(log => 
+              log.topics[0] === '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
+            );
+            if (transferLog && transferLog.data) {
+              value = parseInt(transferLog.data, 16) / 1e18; // Assume 18 decimals
+              asset = 'TOKEN'; // Could fetch token symbol but would be slow
+            }
+          }
+          
+          if (value === 0 || value < 0.000001) return null;
+          
+          const gasUsed = parseInt(receipt.gasUsed, 16);
+          const gasPrice = parseInt(tx.gasPrice || '0x0', 16);
+          const fee = (gasUsed * gasPrice) / 1e18;
+          
+          return {
+            hash: hash,
+            type: type,
+            from: tx.from,
+            to: tx.to || '',
+            value: value,
+            asset: asset,
+            category: tx.value !== '0x0' ? 'external' : 'erc20',
+            timestamp: timestamp,
+            chain: 'monad',
+            fee: fee
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+    );
+    
+    const filtered = transactions.filter(tx => tx !== null);
+    
+    console.log(`✅ Monad: Found ${filtered.length} transactions`);
+    res.json({ transactions: filtered });
+    
+  } catch (err) {
+    console.error(`❌ Monad transaction error:`, err.message);
+    res.json({ transactions: [] });
+  }
+});
+
 console.log('✅ Transaction history routes configured');
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
