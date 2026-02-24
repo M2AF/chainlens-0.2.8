@@ -1228,7 +1228,7 @@ evmChains.forEach(chain => {
             fromBlock: '0x0',
             toBlock: 'latest',
             fromAddress: address,
-            category: ['external', 'internal', 'erc20', 'erc721', 'erc1155'],
+            category: ['external', 'internal', 'erc20'], // Removed erc721/erc1155 (NFTs)
             maxCount: '0x32', // 50 transactions
             order: 'desc'
           }]
@@ -1249,7 +1249,7 @@ evmChains.forEach(chain => {
             fromBlock: '0x0',
             toBlock: 'latest',
             toAddress: address,
-            category: ['external', 'internal', 'erc20', 'erc721', 'erc1155'],
+            category: ['external', 'internal', 'erc20'], // Removed erc721/erc1155 (NFTs)
             maxCount: '0x32',
             order: 'desc'
           }]
@@ -1258,26 +1258,30 @@ evmChains.forEach(chain => {
       
       const receivedData = await receivedRes.json();
       
-      const sentTxs = (sentData.result?.transfers || []).map(tx => ({
-        hash: tx.hash,
-        type: 'sent',
-        from: tx.from,
-        to: tx.to,
-        value: parseFloat(tx.value || 0),
-        asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
-        category: tx.category,
-        timestamp: tx.metadata?.blockTimestamp ? new Date(tx.metadata.blockTimestamp).getTime() : Date.now(),
-        chain: chain.id,
-        rawContract: tx.rawContract
-      }));
+      const sentTxs = (sentData.result?.transfers || [])
+        .filter(tx => tx.value && parseFloat(tx.value) > 0) // Only transactions with value
+        .map(tx => ({
+          hash: tx.hash,
+          type: 'sent',
+          from: tx.from,
+          to: tx.to,
+          value: parseFloat(tx.value),
+          asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
+          category: tx.category,
+          timestamp: tx.metadata?.blockTimestamp ? new Date(tx.metadata.blockTimestamp).getTime() : Date.now(),
+          chain: chain.id,
+          rawContract: tx.rawContract
+        }));
       
-      const receivedTxs = (receivedData.result?.transfers || []).map(tx => ({
-        hash: tx.hash,
-        type: tx.from.toLowerCase() === address.toLowerCase() ? 'self' : 'received',
-        from: tx.from,
-        to: tx.to,
-        value: parseFloat(tx.value || 0),
-        asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
+      const receivedTxs = (receivedData.result?.transfers || [])
+        .filter(tx => tx.value && parseFloat(tx.value) > 0) // Only transactions with value
+        .map(tx => ({
+          hash: tx.hash,
+          type: tx.from.toLowerCase() === address.toLowerCase() ? 'self' : 'received',
+          from: tx.from,
+          to: tx.to,
+          value: parseFloat(tx.value),
+          asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
         category: tx.category,
         timestamp: tx.metadata?.blockTimestamp ? new Date(tx.metadata.blockTimestamp).getTime() : Date.now(),
         chain: chain.id,
@@ -1299,12 +1303,13 @@ evmChains.forEach(chain => {
   });
 });
 
-// Solana transactions using Helius
+// Solana transactions using Helius - Enhanced with parsed transaction details
 app.get('/api/transactions/solana/:address', async (req, res) => {
   const { address } = req.params;
   console.log(`📜 Fetching Solana transactions for: ${address}`);
   
   try {
+    // Get signatures
     const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1312,25 +1317,81 @@ app.get('/api/transactions/solana/:address', async (req, res) => {
         jsonrpc: '2.0',
         id: 1,
         method: 'getSignaturesForAddress',
-        params: [address, { limit: 50 }]
+        params: [address, { limit: 25 }] // Reduced to 25 for performance
       })
     });
     
     const data = await response.json();
-    const signatures = data.result || [];
+    const signatures = (data.result || []).filter(sig => !sig.err); // Filter out failed txs
     
-    const transactions = signatures.map(sig => ({
-      hash: sig.signature,
-      type: sig.err ? 'failed' : 'unknown',
-      from: address,
-      to: '',
-      value: 0,
-      asset: 'SOL',
-      category: 'transaction',
-      timestamp: sig.blockTime ? sig.blockTime * 1000 : Date.now(),
-      chain: 'solana',
-      fee: sig.fee ? sig.fee / 1e9 : 0
-    }));
+    // Fetch parsed details for each transaction (limit to first 20)
+    const txDetails = await Promise.all(
+      signatures.slice(0, 20).map(async (sig) => {
+        try {
+          const detailRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 2,
+              method: 'getParsedTransaction',
+              params: [sig.signature, { maxSupportedTransactionVersion: 0 }]
+            })
+          });
+          
+          const txData = await detailRes.json();
+          const tx = txData.result;
+          
+          if (!tx) return null;
+          
+          // Parse SOL transfers
+          const preBalances = tx.meta?.preBalances || [];
+          const postBalances = tx.meta?.postBalances || [];
+          const accountKeys = tx.transaction?.message?.accountKeys || [];
+          
+          // Find our address index
+          const addressIndex = accountKeys.findIndex(key => 
+            typeof key === 'object' ? key.pubkey === address : key === address
+          );
+          
+          if (addressIndex === -1) return null;
+          
+          const preBalance = preBalances[addressIndex] / 1e9;
+          const postBalance = postBalances[addressIndex] / 1e9;
+          const difference = postBalance - preBalance;
+          
+          // Determine type and value
+          let type = 'self';
+          let value = Math.abs(difference);
+          
+          if (difference < 0) {
+            type = 'sent';
+          } else if (difference > 0) {
+            type = 'received';
+          }
+          
+          // Skip if no meaningful transfer
+          if (Math.abs(difference) < 0.000001) return null;
+          
+          return {
+            hash: sig.signature,
+            type: type,
+            from: type === 'received' ? '' : address,
+            to: type === 'sent' ? '' : address,
+            value: value,
+            asset: 'SOL',
+            category: 'transaction',
+            timestamp: sig.blockTime ? sig.blockTime * 1000 : Date.now(),
+            chain: 'solana',
+            fee: tx.meta?.fee ? tx.meta.fee / 1e9 : 0
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+    );
+    
+    const transactions = txDetails.filter(tx => tx !== null);
     
     console.log(`✅ Solana: Found ${transactions.length} transactions`);
     res.json({ transactions });
@@ -1358,30 +1419,82 @@ app.get('/api/transactions/cardano/:address', async (req, res) => {
     
     const txHashes = await response.json();
     
-    // Get details for each transaction (limit to first 25 for performance)
+    // Get details for each transaction (limit to first 20 for performance)
     const txDetails = await Promise.all(
-      txHashes.slice(0, 25).map(async (tx) => {
+      txHashes.slice(0, 20).map(async (tx) => {
         try {
+          // Fetch transaction details
           const detailRes = await fetch(
             `https://cardano-mainnet.blockfrost.io/api/v0/txs/${tx.tx_hash}`,
             { headers: { project_id: API_KEYS.blockfrost } }
           );
           const detail = await detailRes.json();
           
-          // Determine if sent or received by comparing amounts
-          const outputAmount = parseFloat(detail.output_amount || 0) / 1e6;
+          // Fetch UTXOs to determine sent/received
+          const utxoRes = await fetch(
+            `https://cardano-mainnet.blockfrost.io/api/v0/txs/${tx.tx_hash}/utxos`,
+            { headers: { project_id: API_KEYS.blockfrost } }
+          );
+          const utxo = await utxoRes.json();
+          
+          // Calculate total input from our address
+          const inputAmount = (utxo.inputs || [])
+            .filter(input => input.address === address)
+            .reduce((sum, input) => {
+              const lovelace = input.amount.find(a => a.unit === 'lovelace');
+              return sum + parseInt(lovelace?.quantity || 0);
+            }, 0);
+          
+          // Calculate total output to our address
+          const outputAmount = (utxo.outputs || [])
+            .filter(output => output.address === address)
+            .reduce((sum, output) => {
+              const lovelace = output.amount.find(a => a.unit === 'lovelace');
+              return sum + parseInt(lovelace?.quantity || 0);
+            }, 0);
+          
+          const fee = parseFloat(detail.fees || 0);
+          
+          // Determine type and value
+          let type = 'unknown';
+          let value = 0;
+          
+          if (inputAmount > 0 && outputAmount === 0) {
+            // Sent all out
+            type = 'sent';
+            value = (inputAmount - fee) / 1e6;
+          } else if (inputAmount === 0 && outputAmount > 0) {
+            // Received
+            type = 'received';
+            value = outputAmount / 1e6;
+          } else if (inputAmount > outputAmount) {
+            // Sent (partial)
+            type = 'sent';
+            value = (inputAmount - outputAmount - fee) / 1e6;
+          } else if (outputAmount > inputAmount) {
+            // Received (partial)
+            type = 'received';
+            value = (outputAmount - inputAmount) / 1e6;
+          } else {
+            // Self-transfer
+            type = 'self';
+            value = (fee) / 1e6;
+          }
+          
+          // Skip if value is negligible
+          if (value < 0.01) return null;
           
           return {
             hash: tx.tx_hash,
-            type: 'unknown',
-            from: '',
-            to: '',
-            value: outputAmount,
+            type: type,
+            from: type === 'received' ? '' : address,
+            to: type === 'sent' ? '' : address,
+            value: value,
             asset: 'ADA',
             category: 'transaction',
             timestamp: detail.block_time * 1000,
             chain: 'cardano',
-            fee: parseFloat(detail.fees || 0) / 1e6
+            fee: fee / 1e6
           };
         } catch (e) {
           return null;

@@ -537,6 +537,10 @@
           
           if (isHidden) return false;
           
+          // Filter by view mode
+          if (viewMode === 'nfts' && nft.isToken) return false;
+          if (viewMode === 'tokens' && !nft.isToken) return false;
+          
           if (searchQuery.trim()) {
             const query = searchQuery.toLowerCase();
             return nft.name?.toLowerCase().includes(query) || nft.symbol?.toLowerCase().includes(query);
@@ -554,7 +558,7 @@
             }
             return 0;
         });
-      }, [nfts, hiddenIds, spamIds, searchQuery, sortBy]);
+      }, [nfts, hiddenIds, spamIds, searchQuery, sortBy, viewMode]);
 
       const totalPortfolioValue = useMemo(() => {
         return visibleAssets.reduce((sum, asset) => sum + (parseFloat(asset.totalValue) || 0), 0).toFixed(2);
@@ -591,107 +595,17 @@
         setSpamIds([]);
       };
 
-      const handleSearch = async () => {
+      const handleScanAll = async () => {
         if (!evmAddr && !solAddr && !adaAddr) return;
         setLoading(true);
         setNfts([]);
+        setTransactions([]);
         setResolvedEvm(null);
         
         let targetEvm = evmAddr.trim();
         let targetAda = adaAddr.trim();
 
-        if (targetEvm.includes('.')) {
-          setIsResolving(true);
-          try {
-            // Updated to use the Unstoppable Key from .env logic
-            const res = await fetch(`/api/resolve/unstoppable/${targetEvm}`);
-            const data = await res.json();
-            if (data.address) {
-              targetEvm = data.address;
-              setResolvedEvm(data.address);
-            }
-          } catch (e) { console.error("Resolution error:", e); }
-          setIsResolving(false);
-        }
-
-        if (targetAda && (targetAda.startsWith('$') || !targetAda.startsWith('addr1'))) {
-          setIsResolving(true);
-          try {
-            const res = await fetch(`/api/resolve/handle/${encodeURIComponent(targetAda)}`);
-            const data = await res.json();
-            if (data.address) {
-              targetAda = data.address;
-            }
-          } catch (e) { console.error("ADA Resolution error:", e); }
-          setIsResolving(false);
-        }
-
-        const tasks = [];
-        const modePath = tokenMode ? 'tokens' : 'nfts';
-
-        if (targetEvm.startsWith('0x')) {
-          // Fetch from all EVM chains that have Alchemy API routes
-          ['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'blast', 'zora', 'abstract', 'apechain', 'soneium', 'ronin', 'worldchain'].forEach(chain => {
-            if (activeChains.includes(chain)) {
-              tasks.push(fetch(`/api/${modePath}/${chain}/${targetEvm}`).then(r => r.json()));
-            }
-          });
-
-          // Monad Mainnet via Moralis (backend)
-          if (activeChains.includes('monad')) {
-            tasks.push(fetch(`/api/${modePath}/monad/${targetEvm}`).then(r => r.json()));
-          }
-        }
-
-        if (solAddr.trim() && activeChains.includes('solana')) {
-          tasks.push(fetch(`/api/${modePath}/solana/${solAddr.trim()}`).then(r => r.json()));
-        }
-        if (targetAda && activeChains.includes('cardano')) {
-          tasks.push(fetch(`/api/${modePath}/cardano/${targetAda}`).then(r => r.json()));
-        }
-
-        try {
-          const results = await Promise.allSettled(tasks);
-          const combined = results
-            .filter(r => r.status === 'fulfilled' && r.value.nfts)
-            .flatMap(r => r.value.nfts);
-          
-          const uniqueMap = new Map();
-          combined.forEach(nft => {
-            const rawId = nft.address || nft.id || nft.mint || nft.name;
-            const normalizedId = String(rawId).toLowerCase();
-            const compositeKey = `${nft.chain.toLowerCase()}-${normalizedId}`;
-            
-            if (!uniqueMap.has(compositeKey)) {
-              uniqueMap.set(compositeKey, nft);
-            }
-          });
-          const uniqueAssets = Array.from(uniqueMap.values());
-
-          if (!tokenMode) {
-            const spamWords = ['voucher', 'wen', 'airdrop', 'promo', 'lucky', 'ticket', 'pass', 'jup', 'jupiter', 'unprotected', 'box', 'redeem', 'claim', 'gift', 'reward'];
-            const filtered = uniqueAssets.filter(nft => {
-              const rawName = (nft.name || '').toLowerCase();
-              const name = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "");
-              return !spamWords.some(word => name.includes(word));
-            });
-            setNfts(filtered);
-          } else {
-            setNfts(uniqueAssets);
-          }
-        } catch (e) { console.error("Search error:", e); }
-        setLoading(false);
-      };
-
-      const fetchTransactions = async () => {
-        if (!evmAddr && !solAddr && !adaAddr) return;
-        setLoading(true);
-        setTransactions([]);
-        
-        let targetEvm = evmAddr.trim();
-        let targetAda = adaAddr.trim();
-        
-        // Resolve domains if needed
+        // Resolve domains
         if (targetEvm.includes('.')) {
           setIsResolving(true);
           try {
@@ -704,7 +618,7 @@
           } catch (e) { console.error("Resolution error:", e); }
           setIsResolving(false);
         }
-        
+
         if (targetAda && (targetAda.startsWith('$') || !targetAda.startsWith('addr1'))) {
           setIsResolving(true);
           try {
@@ -714,47 +628,103 @@
           } catch (e) { console.error("ADA Resolution error:", e); }
           setIsResolving(false);
         }
+
+        const evmChains = ['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'blast', 'zora', 'abstract', 'apechain', 'soneium', 'ronin', 'worldchain'];
         
-        const tasks = [];
-        
-        // Fetch transactions from all active chains
+        // Parallel fetch: NFTs, Tokens, and Transactions
+        const nftTasks = [];
+        const tokenTasks = [];
+        const txTasks = [];
+
         if (targetEvm.startsWith('0x')) {
-          ['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'blast', 'zora', 'abstract', 'apechain', 'soneium', 'ronin', 'worldchain'].forEach(chain => {
+          evmChains.forEach(chain => {
             if (activeChains.includes(chain)) {
-              tasks.push(fetch(`/api/transactions/${chain}/${targetEvm}`).then(r => r.json()));
+              nftTasks.push(fetch(`/api/nfts/${chain}/${targetEvm}`).then(r => r.json()));
+              tokenTasks.push(fetch(`/api/tokens/${chain}/${targetEvm}`).then(r => r.json()));
+              txTasks.push(fetch(`/api/transactions/${chain}/${targetEvm}`).then(r => r.json()));
             }
           });
-          
+
           if (activeChains.includes('monad')) {
-            tasks.push(fetch(`/api/transactions/monad/${targetEvm}`).then(r => r.json()));
+            nftTasks.push(fetch(`/api/nfts/monad/${targetEvm}`).then(r => r.json()));
+            tokenTasks.push(fetch(`/api/tokens/monad/${targetEvm}`).then(r => r.json()));
           }
         }
-        
+
         if (solAddr.trim() && activeChains.includes('solana')) {
-          tasks.push(fetch(`/api/transactions/solana/${solAddr.trim()}`).then(r => r.json()));
+          nftTasks.push(fetch(`/api/nfts/solana/${solAddr.trim()}`).then(r => r.json()));
+          tokenTasks.push(fetch(`/api/tokens/solana/${solAddr.trim()}`).then(r => r.json()));
+          txTasks.push(fetch(`/api/transactions/solana/${solAddr.trim()}`).then(r => r.json()));
         }
         
         if (targetAda && activeChains.includes('cardano')) {
-          tasks.push(fetch(`/api/transactions/cardano/${targetAda}`).then(r => r.json()));
+          nftTasks.push(fetch(`/api/nfts/cardano/${targetAda}`).then(r => r.json()));
+          tokenTasks.push(fetch(`/api/tokens/cardano/${targetAda}`).then(r => r.json()));
+          txTasks.push(fetch(`/api/transactions/cardano/${targetAda}`).then(r => r.json()));
         }
-        
+
         try {
-          const results = await Promise.allSettled(tasks);
-          const combined = results
+          // Fetch all in parallel
+          const [nftResults, tokenResults, txResults] = await Promise.all([
+            Promise.allSettled(nftTasks),
+            Promise.allSettled(tokenTasks),
+            Promise.allSettled(txTasks)
+          ]);
+          
+          // Process NFTs
+          const nftCombined = nftResults
+            .filter(r => r.status === 'fulfilled' && r.value.nfts)
+            .flatMap(r => r.value.nfts);
+          
+          const nftMap = new Map();
+          nftCombined.forEach(nft => {
+            const rawId = nft.address || nft.id || nft.mint || nft.name;
+            const key = `${nft.chain}-${String(rawId).toLowerCase()}`;
+            if (!nftMap.has(key)) nftMap.set(key, { ...nft, isToken: false });
+          });
+          
+          // Process Tokens
+          const tokenCombined = tokenResults
+            .filter(r => r.status === 'fulfilled' && r.value.nfts)
+            .flatMap(r => r.value.nfts);
+          
+          tokenCombined.forEach(token => {
+            const rawId = token.address || token.id || token.mint || token.name;
+            const key = `${token.chain}-${String(rawId).toLowerCase()}`;
+            if (!nftMap.has(key)) nftMap.set(key, { ...token, isToken: true });
+          });
+          
+          // Filter spam from NFTs only
+          const allAssets = Array.from(nftMap.values());
+          const spamWords = ['voucher', 'wen', 'airdrop', 'promo', 'lucky', 'ticket', 'pass', 'jup', 'jupiter', 'unprotected', 'box', 'redeem', 'claim', 'gift', 'reward'];
+          const filtered = allAssets.filter(asset => {
+            if (asset.isToken) return true; // Keep all tokens
+            const rawName = (asset.name || '').toLowerCase();
+            const name = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "");
+            return !spamWords.some(word => name.includes(word));
+          });
+          
+          setNfts(filtered);
+          
+          // Process Transactions
+          const txCombined = txResults
             .filter(r => r.status === 'fulfilled' && r.value.transactions)
             .flatMap(r => r.value.transactions);
           
-          // Sort by timestamp (most recent first)
-          const sorted = combined.sort((a, b) => b.timestamp - a.timestamp);
+          const sortedTx = txCombined.sort((a, b) => b.timestamp - a.timestamp);
+          setTransactions(sortedTx);
           
-          console.log(`✅ Loaded ${sorted.length} transactions across ${tasks.length} chains`);
-          setTransactions(sorted);
+          console.log(`✅ Loaded: ${filtered.length} assets, ${sortedTx.length} transactions`);
         } catch (e) {
-          console.error("Transaction fetch error:", e);
+          console.error("Scan error:", e);
         }
         
         setLoading(false);
       };
+
+      // Legacy handlers for backward compatibility
+      const handleSearch = handleScanAll;
+      const fetchTransactions = () => {}; // No longer needed
 
       const ChainButton = ({ id }) => {
         const style = chainStyles[id];
@@ -846,7 +816,7 @@
                   </div>
                   
                   <div className="flex flex-col md:flex-row items-center gap-6">
-                    <button onClick={() => viewMode === 'transactions' ? fetchTransactions() : handleSearch()} disabled={loading} className={`flex-1 py-6 md:py-7 rounded-2xl font-sans font-bold text-2xl md:text-4xl uppercase tracking-widest transition-all active:scale-[0.98] ${loading ? 'opacity-50 cursor-not-allowed scanning-glow' : ''} ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
+                    <button onClick={handleSearch} disabled={loading} className={`flex-1 py-6 md:py-7 rounded-2xl font-sans font-bold text-2xl md:text-4xl uppercase tracking-widest transition-all active:scale-[0.98] ${loading ? 'opacity-50 cursor-not-allowed scanning-glow' : ''} ${darkMode ? 'bg-white text-slate-950 hover:bg-slate-200' : 'bg-slate-950 text-white hover:bg-slate-800 shadow-xl'}`}>
                       {loading ? 'ANALYZING...' : 'SCAN ASSETS'}
                     </button>
 
@@ -857,7 +827,7 @@
                   </div>
                 </div>
 
-                {nfts.length > 0 && (
+                {((nfts.length > 0 && viewMode !== 'transactions') || (transactions.length > 0 && viewMode === 'transactions')) && (
                     <div className={`max-w-6xl mx-auto mb-8 p-6 rounded-3xl border flex flex-wrap items-center justify-between gap-6 transition-all ${darkMode ? 'bg-blue-500/10 border-blue-500/20' : 'bg-white border-slate-200'}`}>
                         <div className="flex gap-8">
                             <div>
