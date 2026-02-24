@@ -1195,6 +1195,213 @@ app.get('/api/market/chart/:coinIdOrSymbol', async (req, res) => {
   }
 });
 
+// --- Transaction History Routes ---
+console.log('🔧 Setting up transaction history routes...');
+
+// Native currency mapping
+const nativeCurrencies = {
+  'ethereum': 'ETH', 'base': 'ETH', 'optimism': 'ETH', 'arbitrum': 'ETH',
+  'zora': 'ETH', 'blast': 'ETH', 'abstract': 'ETH', 'worldchain': 'ETH',
+  'soneium': 'ETH', 'polygon': 'MATIC', 'avalanche': 'AVAX',
+  'apechain': 'APE', 'ronin': 'RON', 'monad': 'MON',
+  'solana': 'SOL', 'cardano': 'ADA'
+};
+
+// EVM chains transaction history using Alchemy
+evmChains.forEach(chain => {
+  app.get(`/api/transactions/${chain.id}/:address`, async (req, res) => {
+    const { address } = req.params;
+    console.log(`📜 Fetching ${chain.id} transactions for: ${address}`);
+    
+    try {
+      const baseUrl = `https://${chain.net}.g.alchemy.com/v2/${API_KEYS.alchemy}`;
+      
+      // Get sent transactions
+      const sentRes = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'alchemy_getAssetTransfers',
+          params: [{
+            fromBlock: '0x0',
+            toBlock: 'latest',
+            fromAddress: address,
+            category: ['external', 'internal', 'erc20', 'erc721', 'erc1155'],
+            maxCount: '0x32', // 50 transactions
+            order: 'desc'
+          }]
+        })
+      });
+      
+      const sentData = await sentRes.json();
+      
+      // Get received transactions
+      const receivedRes = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'alchemy_getAssetTransfers',
+          params: [{
+            fromBlock: '0x0',
+            toBlock: 'latest',
+            toAddress: address,
+            category: ['external', 'internal', 'erc20', 'erc721', 'erc1155'],
+            maxCount: '0x32',
+            order: 'desc'
+          }]
+        })
+      });
+      
+      const receivedData = await receivedRes.json();
+      
+      const sentTxs = (sentData.result?.transfers || []).map(tx => ({
+        hash: tx.hash,
+        type: 'sent',
+        from: tx.from,
+        to: tx.to,
+        value: parseFloat(tx.value || 0),
+        asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
+        category: tx.category,
+        timestamp: tx.metadata?.blockTimestamp ? new Date(tx.metadata.blockTimestamp).getTime() : Date.now(),
+        chain: chain.id,
+        rawContract: tx.rawContract
+      }));
+      
+      const receivedTxs = (receivedData.result?.transfers || []).map(tx => ({
+        hash: tx.hash,
+        type: tx.from.toLowerCase() === address.toLowerCase() ? 'self' : 'received',
+        from: tx.from,
+        to: tx.to,
+        value: parseFloat(tx.value || 0),
+        asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
+        category: tx.category,
+        timestamp: tx.metadata?.blockTimestamp ? new Date(tx.metadata.blockTimestamp).getTime() : Date.now(),
+        chain: chain.id,
+        rawContract: tx.rawContract
+      }));
+      
+      // Combine and sort by timestamp
+      const allTxs = [...sentTxs, ...receivedTxs]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 50);
+      
+      console.log(`✅ ${chain.id}: Found ${allTxs.length} transactions`);
+      res.json({ transactions: allTxs });
+      
+    } catch (err) {
+      console.error(`❌ ${chain.id} transaction error:`, err.message);
+      res.json({ transactions: [] });
+    }
+  });
+});
+
+// Solana transactions using Helius
+app.get('/api/transactions/solana/:address', async (req, res) => {
+  const { address } = req.params;
+  console.log(`📜 Fetching Solana transactions for: ${address}`);
+  
+  try {
+    const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getSignaturesForAddress',
+        params: [address, { limit: 50 }]
+      })
+    });
+    
+    const data = await response.json();
+    const signatures = data.result || [];
+    
+    const transactions = signatures.map(sig => ({
+      hash: sig.signature,
+      type: sig.err ? 'failed' : 'unknown',
+      from: address,
+      to: '',
+      value: 0,
+      asset: 'SOL',
+      category: 'transaction',
+      timestamp: sig.blockTime ? sig.blockTime * 1000 : Date.now(),
+      chain: 'solana',
+      fee: sig.fee ? sig.fee / 1e9 : 0
+    }));
+    
+    console.log(`✅ Solana: Found ${transactions.length} transactions`);
+    res.json({ transactions });
+    
+  } catch (err) {
+    console.error(`❌ Solana transaction error:`, err.message);
+    res.json({ transactions: [] });
+  }
+});
+
+// Cardano transactions using Blockfrost
+app.get('/api/transactions/cardano/:address', async (req, res) => {
+  const { address } = req.params;
+  console.log(`📜 Fetching Cardano transactions for: ${address}`);
+  
+  try {
+    const response = await fetch(
+      `https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}/transactions?count=50&order=desc`,
+      { headers: { project_id: API_KEYS.blockfrost } }
+    );
+    
+    if (!response.ok) {
+      return res.json({ transactions: [] });
+    }
+    
+    const txHashes = await response.json();
+    
+    // Get details for each transaction (limit to first 25 for performance)
+    const txDetails = await Promise.all(
+      txHashes.slice(0, 25).map(async (tx) => {
+        try {
+          const detailRes = await fetch(
+            `https://cardano-mainnet.blockfrost.io/api/v0/txs/${tx.tx_hash}`,
+            { headers: { project_id: API_KEYS.blockfrost } }
+          );
+          const detail = await detailRes.json();
+          
+          // Determine if sent or received by comparing amounts
+          const outputAmount = parseFloat(detail.output_amount || 0) / 1e6;
+          
+          return {
+            hash: tx.tx_hash,
+            type: 'unknown',
+            from: '',
+            to: '',
+            value: outputAmount,
+            asset: 'ADA',
+            category: 'transaction',
+            timestamp: detail.block_time * 1000,
+            chain: 'cardano',
+            fee: parseFloat(detail.fees || 0) / 1e6
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+    );
+    
+    const transactions = txDetails.filter(tx => tx !== null);
+    
+    console.log(`✅ Cardano: Found ${transactions.length} transactions`);
+    res.json({ transactions });
+    
+  } catch (err) {
+    console.error(`❌ Cardano transaction error:`, err.message);
+    res.json({ transactions: [] });
+  }
+});
+
+console.log('✅ Transaction history routes configured');
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 // Validate critical API keys at startup
 if (!API_KEYS.alchemy) {
