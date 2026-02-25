@@ -32,6 +32,7 @@ const NATIVE_CG_IDS = {
   ETH: 'ethereum', MATIC: 'matic-network', POL: 'matic-network',
   AVAX: 'avalanche-2', RON: 'ronin', APE: 'apecoin',
   MON: 'monad', SOL: 'solana', ADA: 'cardano', BNB: 'binancecoin',
+  xDAI: 'xdai', HYPE: 'hyperliquid'
 };
 
 // Simple price cache — 90s TTL
@@ -272,6 +273,8 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
       avalanche:  { symbol:'AVAX', name:'Avalanche',  logo:'https://cryptologos.cc/logos/avalanche-avax-logo.png' },
       ronin:      { symbol:'RON',  name:'Ronin',      logo:'https://cryptologos.cc/logos/ronin-ron-logo.png' },
       apechain:   { symbol:'APE',  name:'ApeCoin',    logo:'https://cryptologos.cc/logos/apecoin-ape-ape-logo.png' },
+      gnosis:     { symbol:'xDAI', name:'Gnosis',     logo:'https://cryptologos.cc/logos/gnosis-gno-logo.png' },
+      hyperevm:   { symbol:'HYPE', name:'HyperEVM',   logo:'https://via.placeholder.com/100/6366f1/ffffff?text=HYPE' },
     };
     const { symbol: nativeSymbol, name: nativeName, logo: nativeLogo } =
       _nc[chainId] || { symbol:'ETH', name:'Ether', logo:'https://cryptologos.cc/logos/ethereum-eth-logo.png' };
@@ -353,9 +356,9 @@ const evmChains = [
   { id: 'apechain', net: 'apechain-mainnet' },
   { id: 'soneium', net: 'soneium-mainnet' },
   { id: 'ronin', net: 'ronin-mainnet' },
-  { id: 'worldchain', net: 'worldchain-mainnet' } // World Mobile Chain
-  // Note: Sui is non-EVM and requires separate Sui RPC API
-  // Note: MegaETH, HyperEVM may require verification with Alchemy
+  { id: 'worldchain', net: 'worldchain-mainnet' },
+  { id: 'gnosis', net: 'gnosis-mainnet' },
+  { id: 'hyperevm', net: 'hyperevm-mainnet' } // Hyperliquid EVM
 ];
 
 evmChains.forEach(chain => {
@@ -1204,6 +1207,7 @@ const nativeCurrencies = {
   'zora': 'ETH', 'blast': 'ETH', 'abstract': 'ETH', 'worldchain': 'ETH',
   'soneium': 'ETH', 'polygon': 'MATIC', 'avalanche': 'AVAX',
   'apechain': 'APE', 'ronin': 'RON', 'monad': 'MON',
+  'gnosis': 'xDAI', 'hyperevm': 'HYPE',
   'solana': 'SOL', 'cardano': 'ADA'
 };
 

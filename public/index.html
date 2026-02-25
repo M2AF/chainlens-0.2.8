@@ -151,6 +151,8 @@
         soneium: { color: 'bg-[#0070D1]', label: 'Soneium', native: 'ETH' },
         ronin: { color: 'bg-[#1273EA]', label: 'Ronin', native: 'RON' },
         worldchain: { color: 'bg-gradient-to-r from-blue-500 to-green-500', label: 'World Chain', native: 'ETH' },
+        gnosis: { color: 'bg-[#04795B]', label: 'Gnosis', native: 'xDAI' },
+        hyperevm: { color: 'bg-[#6366f1]', label: 'HyperEVM', native: 'HYPE' },
         solana: { color: 'bg-solana-gradient-soft', label: 'Solana', native: 'SOL' },
         cardano: { color: 'bg-[#0033AD]', label: 'Cardano', native: 'ADA' },
         monad: { color: 'bg-[#836EF9]', label: 'Monad', native: 'MON' },
@@ -173,7 +175,9 @@
         'apechain': 13,
         'soneium': 14,
         'ronin': 15,
-        'worldchain': 16
+        'worldchain': 16,
+        'gnosis': 17,
+        'hyperevm': 18
       };
 
       useEffect(() => {
@@ -629,7 +633,7 @@
           setIsResolving(false);
         }
 
-        const evmChains = ['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'blast', 'zora', 'abstract', 'apechain', 'soneium', 'ronin', 'worldchain'];
+        const evmChains = ['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'blast', 'zora', 'abstract', 'apechain', 'soneium', 'ronin', 'worldchain', 'gnosis', 'hyperevm'];
         
         // Parallel fetch: NFTs, Tokens, and Transactions
         const nftTasks = [];
@@ -791,7 +795,7 @@
                         {isResolving && <div className="absolute right-4 top-4 animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'abstract', 'blast', 'zora', 'apechain', 'soneium', 'ronin', 'worldchain', 'monad'].map(id => (
+                        {['ethereum', 'base', 'polygon', 'avalanche', 'optimism', 'arbitrum', 'abstract', 'blast', 'zora', 'apechain', 'soneium', 'ronin', 'worldchain', 'gnosis', 'hyperevm', 'monad'].map(id => (
                           <ChainButton key={id} id={id} />
                         ))}
                       </div>
