@@ -1307,101 +1307,78 @@ evmChains.forEach(chain => {
   });
 });
 
-// Solana transactions using Helius - Enhanced with parsed transaction details
+// Solana transactions using Helius - Ultra-simplified
 app.get('/api/transactions/solana/:address', async (req, res) => {
   const { address } = req.params;
-  console.log(`📜 Fetching Solana transactions for: ${address}`);
+  console.log(`\n========================================`);
+  console.log(`📜 SOLANA TX FETCH START`);
+  console.log(`Address: ${address}`);
+  console.log(`Helius Key: ${API_KEYS.helius ? 'Present' : 'MISSING!'}`);
   
   try {
     // Get signatures
-    const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
+    const url = `https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`;
+    console.log(`🔗 Calling: ${url.replace(API_KEYS.helius, 'KEY')}`);
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
         method: 'getSignaturesForAddress',
-        params: [address, { limit: 25 }] // Reduced to 25 for performance
+        params: [address, { limit: 50 }]
       })
     });
     
+    console.log(`📥 Response status: ${response.status}`);
     const data = await response.json();
-    const signatures = (data.result || []).filter(sig => !sig.err); // Filter out failed txs
+    console.log(`📦 Response data keys:`, Object.keys(data));
     
-    // Fetch parsed details for each transaction (limit to first 20)
-    const txDetails = await Promise.all(
-      signatures.slice(0, 20).map(async (sig) => {
-        try {
-          const detailRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id: 2,
-              method: 'getParsedTransaction',
-              params: [sig.signature, { maxSupportedTransactionVersion: 0 }]
-            })
-          });
-          
-          const txData = await detailRes.json();
-          const tx = txData.result;
-          
-          if (!tx) return null;
-          
-          // Parse SOL transfers
-          const preBalances = tx.meta?.preBalances || [];
-          const postBalances = tx.meta?.postBalances || [];
-          const accountKeys = tx.transaction?.message?.accountKeys || [];
-          
-          // Find our address index
-          const addressIndex = accountKeys.findIndex(key => 
-            typeof key === 'object' ? key.pubkey === address : key === address
-          );
-          
-          if (addressIndex === -1) return null;
-          
-          const preBalance = preBalances[addressIndex] / 1e9;
-          const postBalance = postBalances[addressIndex] / 1e9;
-          const difference = postBalance - preBalance;
-          
-          // Determine type and value
-          let type = 'self';
-          let value = Math.abs(difference);
-          
-          if (difference < 0) {
-            type = 'sent';
-          } else if (difference > 0) {
-            type = 'received';
-          }
-          
-          // Skip if no meaningful transfer
-          if (Math.abs(difference) < 0.000001) return null;
-          
-          return {
-            hash: sig.signature,
-            type: type,
-            from: type === 'received' ? '' : address,
-            to: type === 'sent' ? '' : address,
-            value: value,
-            asset: 'SOL',
-            category: 'transaction',
-            timestamp: sig.blockTime ? sig.blockTime * 1000 : Date.now(),
-            chain: 'solana',
-            fee: tx.meta?.fee ? tx.meta.fee / 1e9 : 0
-          };
-        } catch (e) {
-          return null;
-        }
-      })
-    );
+    if (data.error) {
+      console.error(`❌ RPC Error:`, data.error);
+      return res.json({ transactions: [] });
+    }
     
-    const transactions = txDetails.filter(tx => tx !== null);
+    if (!data.result) {
+      console.log(`⚠️ No result field in response`);
+      return res.json({ transactions: [] });
+    }
     
-    console.log(`✅ Solana: Found ${transactions.length} transactions`);
+    const allSignatures = data.result;
+    console.log(`📝 Total signatures returned: ${allSignatures.length}`);
+    console.log(`📝 Sample signature:`, allSignatures[0]);
+    
+    const signatures = allSignatures.filter(sig => !sig.err);
+    console.log(`✅ Valid signatures (no errors): ${signatures.length}`);
+    
+    if (signatures.length === 0) {
+      console.log(`⚠️ No valid signatures after filtering`);
+      return res.json({ transactions: [] });
+    }
+    
+    // Just return basic transaction info without complex parsing
+    const transactions = signatures.slice(0, 50).map(sig => ({
+      hash: sig.signature,
+      type: 'unknown', // We'll show them all
+      from: address,
+      to: '',
+      value: 0, // Can't easily determine without full parsing
+      asset: 'SOL',
+      category: 'transaction',
+      timestamp: sig.blockTime ? sig.blockTime * 1000 : Date.now(),
+      chain: 'solana',
+      fee: 0
+    }));
+    
+    console.log(`✅ Returning ${transactions.length} transactions`);
+    console.log(`========================================\n`);
     res.json({ transactions });
     
   } catch (err) {
-    console.error(`❌ Solana transaction error:`, err.message);
+    console.error(`❌ SOLANA TX ERROR:`, err.message);
+    console.error(`Stack:`, err.stack);
+    console.log(`========================================\n`);
     res.json({ transactions: [] });
   }
 });
@@ -1517,133 +1494,103 @@ app.get('/api/transactions/cardano/:address', async (req, res) => {
   }
 });
 
-// Monad transactions using direct RPC (Alchemy doesn't support Monad)
+// Monad transactions using Moralis API
 app.get('/api/transactions/monad/:address', async (req, res) => {
   const { address } = req.params;
-  console.log(`📜 Fetching Monad transactions for: ${address}`);
-  
-  const MONAD_RPCS = [
-    'https://rpc.monad.xyz',
-    'https://rpc1.monad.xyz',
-    'https://rpc2.monad.xyz',
-  ];
-  
-  const rpcCall = async (method, params) => {
-    for (const rpc of MONAD_RPCS) {
-      try {
-        const res = await fetch(rpc, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
-        });
-        const data = await res.json();
-        if (data.result !== undefined) return data.result;
-      } catch (e) { }
-    }
-    return null;
-  };
+  console.log(`\n========================================`);
+  console.log(`📜 MONAD TX FETCH START`);
+  console.log(`Address: ${address}`);
+  console.log(`Moralis Key: ${API_KEYS.moralis ? 'Present' : 'MISSING!'}`);
   
   try {
-    const currentBlock = await rpcCall('eth_blockNumber', []);
-    if (!currentBlock) {
+    if (!API_KEYS.moralis) {
+      console.error('❌ MORALIS_KEY is missing from .env!');
       return res.json({ transactions: [] });
     }
     
-    const fromBlock = Math.max(0, parseInt(currentBlock, 16) - 10000);
+    // Try the wallet history endpoint (v2.2)
+    const url = `https://deep-index.moralis.io/api/v2.2/${address}/history?chain=0x8f&order=DESC&limit=50`;
+    console.log(`🔗 Calling: ${url}`);
     
-    // Get native MON transfers (sent)
-    const sentTxs = await rpcCall('eth_getLogs', [{
-      fromBlock: '0x' + fromBlock.toString(16),
-      toBlock: 'latest',
-      address: null, // All addresses
-      topics: [
-        '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', // Transfer event
-        '0x' + address.slice(2).padStart(64, '0').toLowerCase() // from address
-      ]
-    }]);
+    const response = await fetch(url, {
+      headers: {
+        'accept': 'application/json',
+        'X-API-Key': API_KEYS.moralis
+      }
+    });
     
-    // Get native MON transfers (received)
-    const receivedTxs = await rpcCall('eth_getLogs', [{
-      fromBlock: '0x' + fromBlock.toString(16),
-      toBlock: 'latest',
-      address: null,
-      topics: [
-        '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
-        null, // any from address
-        '0x' + address.slice(2).padStart(64, '0').toLowerCase() // to address
-      ]
-    }]);
+    console.log(`📥 Response status: ${response.status}`);
     
-    const allLogs = [...(sentTxs || []), ...(receivedTxs || [])];
-    
-    // Get unique transaction hashes and fetch details
-    const txHashes = [...new Set(allLogs.map(log => log.transactionHash))];
-    
-    const transactions = await Promise.all(
-      txHashes.slice(0, 50).map(async (hash) => {
-        try {
-          const tx = await rpcCall('eth_getTransactionByHash', [hash]);
-          const receipt = await rpcCall('eth_getTransactionReceipt', [hash]);
-          
-          if (!tx || !receipt) return null;
-          
-          const block = await rpcCall('eth_getBlockByNumber', [tx.blockNumber, false]);
-          const timestamp = block?.timestamp ? parseInt(block.timestamp, 16) * 1000 : Date.now();
-          
-          // Determine if sent or received
-          const isSent = tx.from.toLowerCase() === address.toLowerCase();
-          const type = isSent ? 'sent' : 'received';
-          
-          // Calculate value (could be native MON or token)
-          let value = 0;
-          let asset = 'MON';
-          
-          // Check if it's a native transfer
-          if (tx.value && tx.value !== '0x0') {
-            value = parseInt(tx.value, 16) / 1e18;
-            asset = 'MON';
-          } else {
-            // It's a token transfer, parse from logs
-            const transferLog = receipt.logs?.find(log => 
-              log.topics[0] === '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
-            );
-            if (transferLog && transferLog.data) {
-              value = parseInt(transferLog.data, 16) / 1e18; // Assume 18 decimals
-              asset = 'TOKEN'; // Could fetch token symbol but would be slow
-            }
-          }
-          
-          if (value === 0 || value < 0.000001) return null;
-          
-          const gasUsed = parseInt(receipt.gasUsed, 16);
-          const gasPrice = parseInt(tx.gasPrice || '0x0', 16);
-          const fee = (gasUsed * gasPrice) / 1e18;
-          
-          return {
-            hash: hash,
-            type: type,
-            from: tx.from,
-            to: tx.to || '',
-            value: value,
-            asset: asset,
-            category: tx.value !== '0x0' ? 'external' : 'erc20',
-            timestamp: timestamp,
-            chain: 'monad',
-            fee: fee
-          };
-        } catch (e) {
-          return null;
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`❌ Moralis error ${response.status}:`, errText.substring(0, 500));
+      
+      // Try alternative endpoint
+      console.log(`🔄 Trying alternative endpoint...`);
+      const altUrl = `https://deep-index.moralis.io/api/v2/${address}?chain=0x8f`;
+      console.log(`🔗 Calling: ${altUrl}`);
+      
+      const altResponse = await fetch(altUrl, {
+        headers: {
+          'accept': 'application/json',
+          'X-API-Key': API_KEYS.moralis
         }
-      })
-    );
+      });
+      
+      console.log(`📥 Alt response status: ${altResponse.status}`);
+      
+      if (!altResponse.ok) {
+        const altErrText = await altResponse.text();
+        console.error(`❌ Alt endpoint also failed:`, altErrText.substring(0, 500));
+        console.log(`========================================\n`);
+        return res.json({ transactions: [] });
+      }
+      
+      const altData = await altResponse.json();
+      console.log(`📦 Alt response keys:`, Object.keys(altData));
+      console.log(`📦 Alt response sample:`, JSON.stringify(altData).substring(0, 300));
+      console.log(`⚠️ Alt endpoint returned data but no transaction list`);
+      console.log(`========================================\n`);
+      return res.json({ transactions: [] });
+    }
     
-    const filtered = transactions.filter(tx => tx !== null);
+    const data = await response.json();
+    console.log(`📦 Response keys:`, Object.keys(data));
+    console.log(`📦 Response sample:`, JSON.stringify(data).substring(0, 300));
     
-    console.log(`✅ Monad: Found ${filtered.length} transactions`);
-    res.json({ transactions: filtered });
+    const txList = data.result || data.transactions || [];
+    console.log(`📝 Transaction count: ${txList.length}`);
+    
+    if (txList.length > 0) {
+      console.log(`📝 Sample transaction:`, JSON.stringify(txList[0]).substring(0, 200));
+    }
+    
+    const transactions = txList.map(tx => {
+      const isSent = tx.from_address?.toLowerCase() === address.toLowerCase();
+      const value = parseFloat(tx.value || 0) / 1e18;
+      
+      return {
+        hash: tx.hash || tx.transaction_hash,
+        type: isSent ? 'sent' : 'received',
+        from: tx.from_address || '',
+        to: tx.to_address || '',
+        value: value,
+        asset: 'MON',
+        category: 'transaction',
+        timestamp: tx.block_timestamp ? new Date(tx.block_timestamp).getTime() : Date.now(),
+        chain: 'monad',
+        fee: 0
+      };
+    });
+    
+    console.log(`✅ Returning ${transactions.length} transactions`);
+    console.log(`========================================\n`);
+    res.json({ transactions });
     
   } catch (err) {
-    console.error(`❌ Monad transaction error:`, err.message);
+    console.error(`❌ MONAD TX ERROR:`, err.message);
+    console.error(`Stack:`, err.stack);
+    console.log(`========================================\n`);
     res.json({ transactions: [] });
   }
 });
