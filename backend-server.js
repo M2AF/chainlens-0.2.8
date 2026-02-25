@@ -1307,7 +1307,7 @@ evmChains.forEach(chain => {
   });
 });
 
-// Solana transactions using Helius - Ultra-simplified
+// Solana transactions using Helius Enhanced API
 app.get('/api/transactions/solana/:address', async (req, res) => {
   const { address } = req.params;
   console.log(`\n========================================`);
@@ -1316,62 +1316,77 @@ app.get('/api/transactions/solana/:address', async (req, res) => {
   console.log(`Helius Key: ${API_KEYS.helius ? 'Present' : 'MISSING!'}`);
   
   try {
-    // Get signatures
-    const url = `https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`;
-    console.log(`🔗 Calling: ${url.replace(API_KEYS.helius, 'KEY')}`);
+    // Use Helius Enhanced Transactions API for parsed data
+    const url = `https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${API_KEYS.helius}&limit=50`;
+    console.log(`🔗 Calling Enhanced API: ${url.replace(API_KEYS.helius, 'KEY')}`);
     
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'getSignaturesForAddress',
-        params: [address, { limit: 50 }]
-      })
+    const response = await fetch(url);
+    console.log(`📥 Response status: ${response.status}`);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ API Error ${response.status}:`, errorText.substring(0, 200));
+      return res.json({ transactions: [] });
+    }
+    
+    const txList = await response.json();
+    console.log(`📦 Response type:`, Array.isArray(txList) ? 'Array' : 'Object');
+    console.log(`📝 Total transactions returned: ${txList.length || 0}`);
+    
+    if (!Array.isArray(txList) || txList.length === 0) {
+      console.log(`⚠️ No transactions found`);
+      return res.json({ transactions: [] });
+    }
+    
+    console.log(`📝 Sample transaction structure:`, Object.keys(txList[0]));
+    
+    // Parse Helius enhanced transactions
+    const transactions = txList.map(tx => {
+      // Helius provides parsed native transfers
+      const nativeTransfers = tx.nativeTransfers || [];
+      const tokenTransfers = tx.tokenTransfers || [];
+      
+      // Find transfers involving our address
+      const ourNativeTransfer = nativeTransfers.find(t => 
+        t.fromUserAccount === address || t.toUserAccount === address
+      );
+      
+      let type = 'unknown';
+      let value = 0;
+      let asset = 'SOL';
+      
+      if (ourNativeTransfer) {
+        value = ourNativeTransfer.amount / 1e9; // Convert lamports to SOL
+        type = ourNativeTransfer.fromUserAccount === address ? 'sent' : 'received';
+        asset = 'SOL';
+      } else if (tokenTransfers.length > 0) {
+        // Token transfer
+        const ourTokenTransfer = tokenTransfers.find(t =>
+          t.fromUserAccount === address || t.toUserAccount === address
+        );
+        if (ourTokenTransfer) {
+          value = ourTokenTransfer.tokenAmount || 0;
+          type = ourTokenTransfer.fromUserAccount === address ? 'sent' : 'received';
+          asset = ourTokenTransfer.mint ? ourTokenTransfer.mint.substring(0, 8) : 'TOKEN';
+        }
+      }
+      
+      return {
+        hash: tx.signature,
+        type: type,
+        from: type === 'received' ? '' : address,
+        to: type === 'sent' ? '' : address,
+        value: value,
+        asset: asset,
+        category: 'transaction',
+        timestamp: tx.timestamp ? tx.timestamp * 1000 : Date.now(),
+        chain: 'solana',
+        fee: tx.fee ? tx.fee / 1e9 : 0
+      };
     });
     
-    console.log(`📥 Response status: ${response.status}`);
-    const data = await response.json();
-    console.log(`📦 Response data keys:`, Object.keys(data));
-    
-    if (data.error) {
-      console.error(`❌ RPC Error:`, data.error);
-      return res.json({ transactions: [] });
-    }
-    
-    if (!data.result) {
-      console.log(`⚠️ No result field in response`);
-      return res.json({ transactions: [] });
-    }
-    
-    const allSignatures = data.result;
-    console.log(`📝 Total signatures returned: ${allSignatures.length}`);
-    console.log(`📝 Sample signature:`, allSignatures[0]);
-    
-    const signatures = allSignatures.filter(sig => !sig.err);
-    console.log(`✅ Valid signatures (no errors): ${signatures.length}`);
-    
-    if (signatures.length === 0) {
-      console.log(`⚠️ No valid signatures after filtering`);
-      return res.json({ transactions: [] });
-    }
-    
-    // Just return basic transaction info without complex parsing
-    const transactions = signatures.slice(0, 50).map(sig => ({
-      hash: sig.signature,
-      type: 'unknown', // We'll show them all
-      from: address,
-      to: '',
-      value: 0, // Can't easily determine without full parsing
-      asset: 'SOL',
-      category: 'transaction',
-      timestamp: sig.blockTime ? sig.blockTime * 1000 : Date.now(),
-      chain: 'solana',
-      fee: 0
-    }));
-    
-    console.log(`✅ Returning ${transactions.length} transactions`);
+    console.log(`✅ Returning ${transactions.length} parsed transactions`);
+    console.log(`📝 Sample parsed tx:`, transactions[0]);
     console.log(`========================================\n`);
     res.json({ transactions });
     
