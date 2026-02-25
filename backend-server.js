@@ -1263,7 +1263,16 @@ evmChains.forEach(chain => {
       const receivedData = await receivedRes.json();
       
       const sentTxs = (sentData.result?.transfers || [])
-        .filter(tx => tx.value && parseFloat(tx.value) > 0) // Only transactions with value
+        .filter(tx => {
+          // Must have value
+          if (!tx.value || parseFloat(tx.value) <= 0) return false;
+          // Must have timestamp - skip if missing
+          if (!tx.metadata?.blockTimestamp) {
+            console.log(`⚠️ ${chain.id}: Skipping tx ${tx.hash} - no timestamp`);
+            return false;
+          }
+          return true;
+        })
         .map(tx => ({
           hash: tx.hash,
           type: 'sent',
@@ -1272,13 +1281,22 @@ evmChains.forEach(chain => {
           value: parseFloat(tx.value),
           asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
           category: tx.category,
-          timestamp: tx.metadata?.blockTimestamp ? new Date(tx.metadata.blockTimestamp).getTime() : Date.now(),
+          timestamp: new Date(tx.metadata.blockTimestamp).getTime(),
           chain: chain.id,
           rawContract: tx.rawContract
         }));
       
       const receivedTxs = (receivedData.result?.transfers || [])
-        .filter(tx => tx.value && parseFloat(tx.value) > 0) // Only transactions with value
+        .filter(tx => {
+          // Must have value
+          if (!tx.value || parseFloat(tx.value) <= 0) return false;
+          // Must have timestamp - skip if missing
+          if (!tx.metadata?.blockTimestamp) {
+            console.log(`⚠️ ${chain.id}: Skipping tx ${tx.hash} - no timestamp`);
+            return false;
+          }
+          return true;
+        })
         .map(tx => ({
           hash: tx.hash,
           type: tx.from.toLowerCase() === address.toLowerCase() ? 'self' : 'received',
@@ -1287,7 +1305,7 @@ evmChains.forEach(chain => {
           value: parseFloat(tx.value),
           asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
         category: tx.category,
-        timestamp: tx.metadata?.blockTimestamp ? new Date(tx.metadata.blockTimestamp).getTime() : Date.now(),
+        timestamp: new Date(tx.metadata.blockTimestamp).getTime(),
         chain: chain.id,
         rawContract: tx.rawContract
       }));
@@ -1340,53 +1358,69 @@ app.get('/api/transactions/solana/:address', async (req, res) => {
     
     console.log(`📝 Sample transaction structure:`, Object.keys(txList[0]));
     
-    // Parse Helius enhanced transactions
-    const transactions = txList.map(tx => {
-      // Helius provides parsed native transfers
-      const nativeTransfers = tx.nativeTransfers || [];
-      const tokenTransfers = tx.tokenTransfers || [];
-      
-      // Find transfers involving our address
-      const ourNativeTransfer = nativeTransfers.find(t => 
-        t.fromUserAccount === address || t.toUserAccount === address
-      );
-      
-      let type = 'unknown';
-      let value = 0;
-      let asset = 'SOL';
-      
-      if (ourNativeTransfer) {
-        value = ourNativeTransfer.amount / 1e9; // Convert lamports to SOL
-        type = ourNativeTransfer.fromUserAccount === address ? 'sent' : 'received';
-        asset = 'SOL';
-      } else if (tokenTransfers.length > 0) {
-        // Token transfer
-        const ourTokenTransfer = tokenTransfers.find(t =>
+    // Parse Helius enhanced transactions and filter
+    const transactions = txList
+      .map(tx => {
+        // Helius provides parsed native transfers
+        const nativeTransfers = tx.nativeTransfers || [];
+        const tokenTransfers = tx.tokenTransfers || [];
+        
+        // Find transfers involving our address
+        const ourNativeTransfer = nativeTransfers.find(t => 
           t.fromUserAccount === address || t.toUserAccount === address
         );
-        if (ourTokenTransfer) {
-          value = ourTokenTransfer.tokenAmount || 0;
-          type = ourTokenTransfer.fromUserAccount === address ? 'sent' : 'received';
-          asset = ourTokenTransfer.mint ? ourTokenTransfer.mint.substring(0, 8) : 'TOKEN';
+        
+        let type = 'unknown';
+        let value = 0;
+        let asset = 'SOL';
+        
+        if (ourNativeTransfer) {
+          value = ourNativeTransfer.amount / 1e9; // Convert lamports to SOL
+          type = ourNativeTransfer.fromUserAccount === address ? 'sent' : 'received';
+          asset = 'SOL';
+        } else if (tokenTransfers.length > 0) {
+          // Token transfer
+          const ourTokenTransfer = tokenTransfers.find(t =>
+            t.fromUserAccount === address || t.toUserAccount === address
+          );
+          if (ourTokenTransfer) {
+            value = ourTokenTransfer.tokenAmount || 0;
+            type = ourTokenTransfer.fromUserAccount === address ? 'sent' : 'received';
+            asset = ourTokenTransfer.mint ? ourTokenTransfer.mint.substring(0, 8) : 'TOKEN';
+          }
         }
-      }
-      
-      return {
-        hash: tx.signature,
-        type: type,
-        from: type === 'received' ? '' : address,
-        to: type === 'sent' ? '' : address,
-        value: value,
-        asset: asset,
-        category: 'transaction',
-        timestamp: tx.timestamp ? tx.timestamp * 1000 : Date.now(),
-        chain: 'solana',
-        fee: tx.fee ? tx.fee / 1e9 : 0
-      };
-    });
+        
+        // Must have valid timestamp
+        if (!tx.timestamp) {
+          console.log(`⚠️ Solana: Skipping tx ${tx.signature} - no timestamp`);
+          return null;
+        }
+        
+        // Must have type and value (skip unknown/NFT transactions)
+        if (type === 'unknown' || value === 0) {
+          console.log(`⚠️ Solana: Skipping tx ${tx.signature} - type: ${type}, value: ${value}`);
+          return null;
+        }
+        
+        return {
+          hash: tx.signature,
+          type: type,
+          from: type === 'received' ? '' : address,
+          to: type === 'sent' ? '' : address,
+          value: value,
+          asset: asset,
+          category: 'transaction',
+          timestamp: tx.timestamp * 1000,
+          chain: 'solana',
+          fee: tx.fee ? tx.fee / 1e9 : 0
+        };
+      })
+      .filter(tx => tx !== null); // Remove nulls
     
-    console.log(`✅ Returning ${transactions.length} parsed transactions`);
-    console.log(`📝 Sample parsed tx:`, transactions[0]);
+    console.log(`✅ Returning ${transactions.length} parsed transactions (filtered)`);
+    if (transactions.length > 0) {
+      console.log(`📝 Sample parsed tx:`, transactions[0]);
+    }
     console.log(`========================================\n`);
     res.json({ transactions });
     
@@ -1537,66 +1571,49 @@ app.get('/api/transactions/monad/:address', async (req, res) => {
     console.log(`📥 Response status: ${response.status}`);
     
     if (!response.ok) {
-      const errText = await response.text();
-      console.error(`❌ Moralis error ${response.status}:`, errText.substring(0, 500));
-      
-      // Try alternative endpoint
-      console.log(`🔄 Trying alternative endpoint...`);
-      const altUrl = `https://deep-index.moralis.io/api/v2/${address}?chain=0x8f`;
-      console.log(`🔗 Calling: ${altUrl}`);
-      
-      const altResponse = await fetch(altUrl, {
-        headers: {
-          'accept': 'application/json',
-          'X-API-Key': API_KEYS.moralis
-        }
-      });
-      
-      console.log(`📥 Alt response status: ${altResponse.status}`);
-      
-      if (!altResponse.ok) {
-        const altErrText = await altResponse.text();
-        console.error(`❌ Alt endpoint also failed:`, altErrText.substring(0, 500));
-        console.log(`========================================\n`);
-        return res.json({ transactions: [] });
-      }
-      
-      const altData = await altResponse.json();
-      console.log(`📦 Alt response keys:`, Object.keys(altData));
-      console.log(`📦 Alt response sample:`, JSON.stringify(altData).substring(0, 300));
-      console.log(`⚠️ Alt endpoint returned data but no transaction list`);
+      console.log(`⚠️ Monad not supported by Moralis yet (chain 0x8f)`);
       console.log(`========================================\n`);
       return res.json({ transactions: [] });
     }
     
     const data = await response.json();
     console.log(`📦 Response keys:`, Object.keys(data));
-    console.log(`📦 Response sample:`, JSON.stringify(data).substring(0, 300));
     
     const txList = data.result || data.transactions || [];
     console.log(`📝 Transaction count: ${txList.length}`);
     
-    if (txList.length > 0) {
-      console.log(`📝 Sample transaction:`, JSON.stringify(txList[0]).substring(0, 200));
+    if (txList.length === 0) {
+      console.log(`⚠️ No Monad transactions found`);
+      console.log(`========================================\n`);
+      return res.json({ transactions: [] });
     }
     
-    const transactions = txList.map(tx => {
-      const isSent = tx.from_address?.toLowerCase() === address.toLowerCase();
-      const value = parseFloat(tx.value || 0) / 1e18;
-      
-      return {
-        hash: tx.hash || tx.transaction_hash,
-        type: isSent ? 'sent' : 'received',
-        from: tx.from_address || '',
-        to: tx.to_address || '',
-        value: value,
-        asset: 'MON',
-        category: 'transaction',
-        timestamp: tx.block_timestamp ? new Date(tx.block_timestamp).getTime() : Date.now(),
-        chain: 'monad',
-        fee: 0
-      };
-    });
+    const transactions = txList
+      .filter(tx => {
+        // Must have timestamp
+        if (!tx.block_timestamp) {
+          console.log(`⚠️ Monad: Skipping tx without timestamp`);
+          return false;
+        }
+        return true;
+      })
+      .map(tx => {
+        const isSent = tx.from_address?.toLowerCase() === address.toLowerCase();
+        const value = parseFloat(tx.value || 0) / 1e18;
+        
+        return {
+          hash: tx.hash || tx.transaction_hash,
+          type: isSent ? 'sent' : 'received',
+          from: tx.from_address || '',
+          to: tx.to_address || '',
+          value: value,
+          asset: 'MON',
+          category: 'transaction',
+          timestamp: new Date(tx.block_timestamp).getTime(),
+          chain: 'monad',
+          fee: 0
+        };
+      });
     
     console.log(`✅ Returning ${transactions.length} transactions`);
     console.log(`========================================\n`);
