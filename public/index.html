@@ -139,6 +139,7 @@
       const [chartTimeframe, setChartTimeframe] = useState('7d'); // 1d, 7d, 1m, 1y, all
       const [convCoin, setConvCoin] = useState('');   // coin amount input
       const [convUsd, setConvUsd] = useState('');     // usd amount input
+      const [nativePrices, setNativePrices] = useState({}); // { ETH: 3000, SOL: 85, ... }
 
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
@@ -213,6 +214,40 @@
         const interval = setInterval(fetchMarket, 60000);
         return () => clearInterval(interval);
       }, []);
+
+      // Map each chain's native token symbol → CoinGecko ID
+      const NATIVE_CG_MAP = {
+        ETH: 'ethereum', SOL: 'solana', ADA: 'cardano', MON: 'monad',
+        AVAX: 'avalanche-2', POL: 'matic-network', RON: 'ronin',
+        APE: 'apecoin', HYPE: 'hyperliquid', xDAI: 'xdai', BNB: 'binancecoin'
+      };
+
+      // Keep nativePrices synced with marketData — uses market watch prices where available,
+      // fetches any missing native tokens in a single batched CoinGecko call
+      useEffect(() => {
+        if (!marketData.length) return;
+        const prices = {};
+        // Pull from already-loaded market watch data first (free, instant, no extra call)
+        Object.entries(NATIVE_CG_MAP).forEach(([symbol, cgId]) => {
+          const found = marketData.find(c => c.id === cgId);
+          if (found && found.current_price > 0) prices[symbol] = found.current_price;
+        });
+        // Batch-fetch any native tokens not yet in marketData (e.g. MON, HYPE)
+        const missing = Object.entries(NATIVE_CG_MAP).filter(([sym]) => !prices[sym]);
+        if (missing.length > 0) {
+          const ids = missing.map(([, id]) => id).join(',');
+          fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`)
+            .then(r => r.json())
+            .then(d => {
+              const extra = {};
+              missing.forEach(([sym, id]) => { if (d[id]?.usd) extra[sym] = d[id].usd; });
+              setNativePrices(prev => ({ ...prev, ...prices, ...extra }));
+            })
+            .catch(() => setNativePrices(prev => ({ ...prev, ...prices })));
+        } else {
+          setNativePrices(prev => ({ ...prev, ...prices }));
+        }
+      }, [marketData]);
 
       // Search function - searches loaded list first, then CoinGecko search API
       const searchCoin = async (query) => {
@@ -996,9 +1031,15 @@
                                 <p className="text-emerald-500 font-bold text-sm md:text-lg leading-tight whitespace-nowrap">
                                     {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
                                 </p>
-                                {/* Blue: Native - Middle */}
+                                {/* Blue: Native - Middle — total holding value in native token */}
                                 <span className={`font-bold uppercase tracking-tighter text-sm md:text-base whitespace-nowrap ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-                                    {parseFloat(nft.nativePrice || 0).toFixed(4)} {chainStyles[nft.chain]?.native || '???'}
+                                    {(() => {
+                                      const nativeSym = chainStyles[nft.chain]?.native || '???';
+                                      const nativeUsd = nativePrices[nativeSym] || 0;
+                                      const totalUsd = parseFloat(nft.totalValue) || 0;
+                                      const val = (nativeUsd > 0 && totalUsd > 0) ? (totalUsd / nativeUsd) : 0;
+                                      return val.toFixed(4);
+                                    })()} {chainStyles[nft.chain]?.native || '???'}
                                 </span>
                                 {/* Grey: USD - Bottom */}
                                 <span className={`font-bold uppercase tracking-tighter text-xs md:text-sm opacity-70 whitespace-nowrap ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
