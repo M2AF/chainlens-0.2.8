@@ -316,6 +316,9 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
         if (balance < 0.000001) return null;
 
         const usdPrice = await fetchUSDPrice(chainId, token.contractAddress);
+        
+        // Calculate native price: if token is $10 and native is $3000, token = 0.0033 native
+        const nativePrice = nativeUsdPrice > 0 ? (usdPrice / nativeUsdPrice) : 0;
 
         return {
           id: token.contractAddress,
@@ -323,7 +326,7 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
           symbol: metadata.symbol || '???',
           balance: balance.toFixed(4),
           usdPrice: usdPrice,
-          nativePrice: toNativePrice(usdPrice * balance, nativeUsdPrice),
+          nativePrice: nativePrice.toFixed(4), // Price per token in native currency
           totalValue: (balance * usdPrice).toFixed(2),
           image: metadata.logo || `https://via.placeholder.com/400/334155/ffffff?text=${metadata.symbol || '$'}`,
           chain: chainId,
@@ -439,7 +442,7 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
             symbol: 'MON',
             balance: balance.toFixed(4),
             usdPrice: monUsdPrice,
-            nativePrice: balance.toFixed(4),
+            nativePrice: '1.0000', // MON in MON = 1
             totalValue: (balance * monUsdPrice).toFixed(2),
             image: 'https://assets.coingecko.com/coins/images/54540/small/monad.png',
             chain: 'monad',
@@ -463,13 +466,15 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
           : parseInt(t.balance || '0', 10) / Math.pow(10, decimals);
         if (!balance || balance < 0.000001) return null;
         const usdPrice = await fetchUSDPrice('monad', t.token_address);
+        const nativePrice = monUsdPrice > 0 ? (usdPrice / monUsdPrice) : 0; // Fixed: price per token in MON
+        
         return {
           id: t.token_address,
           name: t.name || 'Unknown Token',
           symbol: t.symbol || '???',
           balance: balance.toFixed(4),
           usdPrice,
-          nativePrice: toNativePrice(usdPrice * balance, monUsdPrice),
+          nativePrice: nativePrice.toFixed(4), // Price per token in MON
           totalValue: (balance * usdPrice).toFixed(2),
           image: t.logo || t.thumbnail || `https://via.placeholder.com/400/836EF9/ffffff?text=${t.symbol || 'MON'}`,
           chain: 'monad',
@@ -564,13 +569,15 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
             console.log(`  ✅ RPC found: ${symbol} (${name}) = ${balance}`);
 
             const usdPrice = await fetchUSDPrice('monad', contractAddr);
+            const nativePrice = monUsdPrice > 0 ? (usdPrice / monUsdPrice) : 0; // Fixed: price per token in MON
+            
             return {
               id: contractAddr,
               name,
               symbol,
               balance: balance.toFixed(4),
               usdPrice,
-              nativePrice: toNativePrice(usdPrice * balance, monUsdPrice),
+              nativePrice: nativePrice.toFixed(4), // Price per token in MON
               totalValue: (balance * usdPrice).toFixed(2),
               image: `https://via.placeholder.com/50/836EF9/ffffff?text=${encodeURIComponent(symbol)}`,
               chain: 'monad',
@@ -626,11 +633,13 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
                 if (balance < 0.000001) return null;
                 console.log(`  ✅ Log scan found: ${symbol} = ${balance}`);
                 const usdPrice = await fetchUSDPrice('monad', contractAddr);
+                const nativePrice = monUsdPrice > 0 ? (usdPrice / monUsdPrice) : 0; // Fixed: price per token in MON
+                
                 return {
                   id: contractAddr, name, symbol,
                   balance: balance.toFixed(4), usdPrice,
                   totalValue: (balance * usdPrice).toFixed(2),
-                  nativePrice: toNativePrice(usdPrice * balance, monUsdPrice),
+                  nativePrice: nativePrice.toFixed(4), // Price per token in MON
                   image: `https://via.placeholder.com/50/836EF9/ffffff?text=${encodeURIComponent(symbol)}`,
                   chain: 'monad', isToken: true, address: contractAddr
                 };
@@ -714,25 +723,52 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
     });
     const data = await response.json();
     const items = data.result?.items || [];
+    const nativeBalance = data.result?.nativeBalance || null;
 
     if (mode === 'tokens') {
-      const tokens = items.filter(i => i.interface === 'FungibleToken' || i.interface === 'FungibleAsset').map(t => {
+      const tokens = [];
+      
+      // Add native SOL balance first
+      if (nativeBalance) {
+        const solBalance = (nativeBalance.lamports || 0) / 1e9;
+        if (solBalance > 0) {
+          tokens.push({
+            id: 'native-sol',
+            name: 'Solana',
+            symbol: 'SOL',
+            balance: solBalance.toFixed(4),
+            usdPrice: solPrice,
+            nativePrice: '1.0000', // SOL in SOL = 1
+            totalValue: (solBalance * solPrice).toFixed(2),
+            image: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+            chain: 'solana',
+            isToken: true
+          });
+        }
+      }
+      
+      // Add SPL tokens
+      const splTokens = items.filter(i => i.interface === 'FungibleToken' || i.interface === 'FungibleAsset').map(t => {
         const balanceNum = (t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0));
         const usdPrice = t.token_info?.price_info?.price_per_token || 0;
+        const nativePrice = solPrice > 0 ? (usdPrice / solPrice) : 0; // Fixed: price per token in SOL
+        
         return {
           id: t.id,
           name: t.content?.metadata?.name || 'Solana Token',
-          symbol: t.content?.metadata?.symbol || 'SOL',
+          symbol: t.content?.metadata?.symbol || 'SPL',
           balance: balanceNum.toFixed(4),
           usdPrice: usdPrice,
-          nativePrice: toNativePrice(usdPrice * balanceNum, solPrice),
+          nativePrice: nativePrice.toFixed(4), // Price per token in SOL
           totalValue: (balanceNum * usdPrice).toFixed(2),
           image: t.content?.links?.image || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
           chain: 'solana',
           isToken: true
         };
       });
-      res.json({ nfts: tokens.filter(t => parseFloat(t.balance) > 0) });
+      
+      tokens.push(...splTokens.filter(t => parseFloat(t.balance) > 0));
+      res.json({ nfts: tokens });
     } else {
       const nfts = items.filter(i => i.interface !== 'FungibleToken' && i.interface !== 'FungibleAsset').map(asset => ({
         id: asset.id,
@@ -797,6 +833,30 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
     if (addrRes.status === 404) return res.json({ nfts: [] });
     const addrData = await addrRes.json();
     if (!addrData.stake_address) return res.json({ nfts: [] });
+    
+    const results = [];
+    
+    // Add native ADA balance for tokens mode
+    if (mode === 'tokens') {
+      const adaLovelace = parseInt(addrData.amount?.find(a => a.unit === 'lovelace')?.quantity || 0);
+      const adaBalance = adaLovelace / 1e6;
+      if (adaBalance > 0) {
+        results.push({
+          id: 'native-ada',
+          name: 'Cardano',
+          symbol: 'ADA',
+          balance: adaBalance.toFixed(2),
+          usdPrice: adaPrice,
+          nativePrice: '1.0000', // ADA in ADA = 1
+          totalValue: (adaBalance * adaPrice).toFixed(2),
+          image: 'https://cryptologos.cc/logos/cardano-ada-logo.png',
+          chain: 'cardano',
+          isToken: true,
+          metadata: { traits: [], description: '' }
+        });
+      }
+    }
+    
     const assetsRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/accounts/${addrData.stake_address}/addresses/assets`, { headers: { project_id: API_KEYS.blockfrost } });
     const assets = await assetsRes.json();
     const tasks = assets.slice(0, 30).map(async (a) => {
@@ -809,6 +869,8 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
       const _cgId = NATIVE_CG_IDS[_ticker?.toUpperCase()];
       const usdPrice = _cgId ? await fetchCoinGeckoPrice(_cgId) : 0;
       const balance = (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0));
+      const nativePrice = adaPrice > 0 ? (usdPrice / adaPrice) : 0; // Fixed: price per token in ADA
+      
       let img = meta.onchain_metadata?.image || '';
       if (Array.isArray(img)) img = img.join('');
       const imageUrl = img ? (img.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}` : (img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`)) : '';
@@ -819,15 +881,16 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
         image: imageUrl || 'https://via.placeholder.com/400/0033AD/ffffff?text=ADA',
         balance: mode === 'tokens' ? balance.toFixed(2) : null,
         usdPrice: usdPrice,
-        nativePrice: toNativePrice(usdPrice * balance, adaPrice),
+        nativePrice: nativePrice.toFixed(4), // Price per token in ADA
         totalValue: (balance * usdPrice).toFixed(2),
         symbol: meta.metadata?.ticker || '',
         isToken: mode === 'tokens',
         metadata: { traits: meta.onchain_metadata?.attributes || [], description: meta.onchain_metadata?.description || '' }
       };
     });
-    const results = await Promise.all(tasks);
-    res.json({ nfts: results.filter(n => n !== null) });
+    const taskResults = await Promise.all(tasks);
+    results.push(...taskResults.filter(n => n !== null));
+    res.json({ nfts: results });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
