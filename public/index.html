@@ -585,7 +585,20 @@
         });
 
         return filtered.sort((a, b) => {
-            if (sortBy === 'value') return (parseFloat(b.totalValue) || 0) - (parseFloat(a.totalValue) || 0);
+            if (sortBy === 'value') {
+              const liveUsd = (asset) => {
+                const v = parseFloat(asset.totalValue) || 0;
+                if (v > 0) return v;
+                // Compute live for chains where backend sends $0.00 (ADA, MON, POL native tokens)
+                const sym = chainStyles[asset.chain]?.native;
+                const nativeUsd = sym ? (nativePrices[sym] || 0) : 0;
+                if (nativeUsd <= 0) return 0;
+                const bal = parseFloat(asset.balance) || 0;
+                if (sym && asset.symbol?.toUpperCase() === sym.toUpperCase()) return bal * nativeUsd;
+                return parseFloat(asset.nativePrice || 0) * nativeUsd;
+              };
+              return liveUsd(b) - liveUsd(a);
+            }
             if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '');
             if (sortBy === 'chain') {
                 const priorityA = chainPriority[a.chain.toLowerCase()] || 99;
