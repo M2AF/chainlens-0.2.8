@@ -215,32 +215,21 @@
         return () => clearInterval(interval);
       }, []);
 
-      // CoinGecko IDs for every native token used across all supported chains
       const NATIVE_CG_MAP = {
-        ETH:  'ethereum',
-        SOL:  'solana',
-        ADA:  'cardano',
-        MON:  'monad',
-        AVAX: 'avalanche-2',
-        POL:  'matic-network',
-        RON:  'ronin',
-        APE:  'apecoin',
-        HYPE: 'hyperliquid',
-        xDAI: 'xdai',
-        BNB:  'binancecoin',
+        ETH:  'ethereum',      SOL:  'solana',         ADA:  'cardano',
+        MON:  'monad',         AVAX: 'avalanche-2',    POL:  'matic-network',
+        RON:  'ronin',         APE:  'apecoin',        HYPE: 'hyperliquid',
+        xDAI: 'xdai',          BNB:  'binancecoin',
       };
 
-      // Keep nativePrices up to date whenever marketData changes.
-      // Pulls prices from already-loaded market watch coins first (free, instant),
-      // then fetches any missing ones in one batched CoinGecko simple/price call.
+      // Sync nativePrices from marketData (free, instant for top-100 coins)
+      // + batch-fetch any missing native tokens in one CoinGecko call
       useEffect(() => {
         const prices = {};
-        // Step 1 — extract from market watch data (top-100 + searched coins)
         Object.entries(NATIVE_CG_MAP).forEach(([sym, cgId]) => {
           const hit = marketData.find(mc => mc.id === cgId);
           if (hit?.current_price > 0) prices[sym] = hit.current_price;
         });
-        // Step 2 — batch-fetch anything still missing (MON, HYPE, xDAI, RON etc.)
         const missing = Object.entries(NATIVE_CG_MAP).filter(([sym]) => !prices[sym]);
         if (missing.length > 0) {
           const ids = missing.map(([, id]) => id).join(',');
@@ -1038,20 +1027,37 @@
                                 <p className="text-emerald-500 font-bold text-sm md:text-lg leading-tight whitespace-nowrap">
                                     {nft.balance} <span className="text-[10px] opacity-60">{nft.symbol}</span>
                                 </p>
-                                {/* Blue: Native - Middle — total holding value converted to native token */}
+                                {/* Blue: Native - Middle */}
                                 <span className={`font-bold uppercase tracking-tighter text-sm md:text-base whitespace-nowrap ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>
                                     {(() => {
                                       const sym = chainStyles[nft.chain]?.native;
                                       const nativeUsd = sym ? (nativePrices[sym] || 0) : 0;
                                       const totalUsd = parseFloat(nft.totalValue) || 0;
+                                      const bal = parseFloat(nft.balance) || 0;
+                                      // Native token (ADA on Cardano, MON on Monad, etc): balance IS native amount
+                                      if (sym && nft.symbol?.toUpperCase() === sym.toUpperCase()) return bal.toFixed(4);
+                                      // ERC20/SPL token: convert USD value to native
                                       if (nativeUsd > 0 && totalUsd > 0) return (totalUsd / nativeUsd).toFixed(4);
-                                      // Fallback: use backend nativePrice × balance when market price unavailable
+                                      // Fallback to backend's stored nativePrice
                                       return parseFloat(nft.nativePrice || 0).toFixed(4);
                                     })()} {chainStyles[nft.chain]?.native || '???'}
                                 </span>
                                 {/* Grey: USD - Bottom */}
                                 <span className={`font-bold uppercase tracking-tighter text-xs md:text-sm opacity-70 whitespace-nowrap ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                    ${nft.totalValue || '0.00'}
+                                    ${(() => {
+                                      const backendVal = parseFloat(nft.totalValue) || 0;
+                                      if (backendVal > 0) return backendVal.toFixed(2);
+                                      // Backend totalValue is 0 — compute from balance × live native price
+                                      const sym = chainStyles[nft.chain]?.native;
+                                      const nativeUsd = sym ? (nativePrices[sym] || 0) : 0;
+                                      if (nativeUsd <= 0) return '0.00';
+                                      const bal = parseFloat(nft.balance) || 0;
+                                      const isNative = sym && nft.symbol?.toUpperCase() === sym.toUpperCase();
+                                      if (isNative) return (bal * nativeUsd).toFixed(2);
+                                      // Non-native: use backend nativePrice × nativeUsd
+                                      const nativeAmt = parseFloat(nft.nativePrice || 0);
+                                      return (nativeAmt * nativeUsd).toFixed(2);
+                                    })()}
                                 </span>
                             </div>
                             )}
