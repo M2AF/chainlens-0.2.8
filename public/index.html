@@ -1333,9 +1333,9 @@
                             </div>
                         ) : chartData?.prices ? (
                             <div>
-                                <div className="relative" style={{height: '400px'}}>
-                                    <canvas id="priceChart"></canvas>
-                                </div>
+                              <div className="relative" style={{height: '400px', overflowX: 'auto'}}>
+                                <canvas id="priceChart" width={958} height={400} style={{width: '958px', height: '400px', display: 'block', margin: '0 auto'}}></canvas>
+                              </div>
                                 <p className="text-xs opacity-30 mt-2 text-center">
                                     {chartData.prices.length} data points · {chartData.source || 'Unknown'} API
                                 </p>
