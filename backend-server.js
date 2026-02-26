@@ -785,6 +785,26 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
 });
 
 // --- Cardano ---
+// 4. Solana Name Service (SNS) — .sol domains via Bonfida public proxy
+app.get('/api/resolve/sns/:name', async (req, res) => {
+  // Strip .sol suffix if present, lowercase
+  const name = req.params.name.replace(/\.sol$/i, '').toLowerCase().trim();
+  console.log(`🔍 Resolving SNS: ${name}.sol`);
+  try {
+    const r = await fetch(`https://sns-sdk-proxy.bonfida.workers.dev/resolve/${encodeURIComponent(name)}`);
+    if (!r.ok) return res.status(404).json({ error: `SNS domain "${name}.sol" not found` });
+    const d = await r.json();
+    if (d.s === 'ok' && d.result) {
+      console.log(`✅ SNS resolved: ${name}.sol → ${d.result}`);
+      return res.json({ address: d.result, domain: `${name}.sol` });
+    }
+    res.status(404).json({ error: `SNS domain "${name}.sol" not found or not registered` });
+  } catch (err) {
+    console.error(`❌ SNS resolution error for ${name}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Helper: Resolve ADA Handle to Address
 const resolveAdaHandle = async (handle) => {
   const cleanHandle = handle.replace('$', '').toLowerCase();
