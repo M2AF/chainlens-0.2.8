@@ -1211,7 +1211,7 @@ const nativeCurrencies = {
   'solana': 'SOL', 'cardano': 'ADA'
 };
 
-// EVM chains transaction history using Alchemy
+// EVM chains transaction history using Alchemy - OPTIMIZED BLOCK TIMESTAMPS
 evmChains.forEach(chain => {
   app.get(`/api/transactions/${chain.id}/:address`, async (req, res) => {
     const { address } = req.params;
@@ -1232,8 +1232,8 @@ evmChains.forEach(chain => {
             fromBlock: '0x0',
             toBlock: 'latest',
             fromAddress: address,
-            category: ['external', 'internal', 'erc20'], // Removed erc721/erc1155 (NFTs)
-            maxCount: '0x32', // 50 transactions
+            category: ['external', 'internal', 'erc20'],
+            maxCount: '0x32',
             order: 'desc'
           }]
         })
@@ -1253,7 +1253,7 @@ evmChains.forEach(chain => {
             fromBlock: '0x0',
             toBlock: 'latest',
             toAddress: address,
-            category: ['external', 'internal', 'erc20'], // Removed erc721/erc1155 (NFTs)
+            category: ['external', 'internal', 'erc20'],
             maxCount: '0x32',
             order: 'desc'
           }]
@@ -1262,60 +1262,73 @@ evmChains.forEach(chain => {
       
       const receivedData = await receivedRes.json();
       
-      const sentTxs = (sentData.result?.transfers || [])
-        .filter(tx => {
-          // Must have value
-          if (!tx.value || parseFloat(tx.value) <= 0) return false;
-          // Must have timestamp - skip if missing
-          if (!tx.metadata?.blockTimestamp) {
-            console.log(`⚠️ ${chain.id}: Skipping tx ${tx.hash} - no timestamp`);
-            return false;
+      // Combine all transfers
+      const allTransfers = [
+        ...(sentData.result?.transfers || []).map(tx => ({ ...tx, type: 'sent' })),
+        ...(receivedData.result?.transfers || []).map(tx => ({ 
+          ...tx, 
+          type: tx.from.toLowerCase() === address.toLowerCase() ? 'self' : 'received' 
+        }))
+      ].filter(tx => tx.value && parseFloat(tx.value) > 0 && tx.blockNum);
+      
+      // Get unique block numbers
+      const uniqueBlocks = [...new Set(allTransfers.map(tx => tx.blockNum))];
+      console.log(`📦 ${chain.id}: Fetching ${uniqueBlocks.length} unique blocks for ${allTransfers.length} transactions`);
+      
+      // Batch fetch all unique blocks (much more efficient!)
+      const blockTimestamps = {};
+      await Promise.all(
+        uniqueBlocks.slice(0, 30).map(async (blockNum) => {
+          try {
+            const blockRes = await fetch(baseUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 3,
+                method: 'eth_getBlockByNumber',
+                params: [blockNum, false]
+              })
+            });
+            
+            const blockData = await blockRes.json();
+            if (blockData.result && blockData.result.timestamp) {
+              const timestamp = parseInt(blockData.result.timestamp, 16) * 1000;
+              blockTimestamps[blockNum] = timestamp;
+            }
+          } catch (e) {
+            console.log(`⚠️ ${chain.id}: Error fetching block ${blockNum}`);
           }
-          return true;
         })
-        .map(tx => ({
-          hash: tx.hash,
-          type: 'sent',
-          from: tx.from,
-          to: tx.to,
-          value: parseFloat(tx.value),
-          asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
-          category: tx.category,
-          timestamp: new Date(tx.metadata.blockTimestamp).getTime(),
-          chain: chain.id,
-          rawContract: tx.rawContract
-        }));
+      );
       
-      const receivedTxs = (receivedData.result?.transfers || [])
-        .filter(tx => {
-          // Must have value
-          if (!tx.value || parseFloat(tx.value) <= 0) return false;
-          // Must have timestamp - skip if missing
-          if (!tx.metadata?.blockTimestamp) {
-            console.log(`⚠️ ${chain.id}: Skipping tx ${tx.hash} - no timestamp`);
-            return false;
+      // Map timestamps to transactions
+      const allTxs = allTransfers
+        .slice(0, 50)
+        .map(tx => {
+          const timestamp = blockTimestamps[tx.blockNum];
+          if (!timestamp) {
+            console.log(`⚠️ ${chain.id}: No timestamp for block ${tx.blockNum}, skipping tx`);
+            return null;
           }
-          return true;
+          
+          return {
+            hash: tx.hash,
+            type: tx.type,
+            from: tx.from,
+            to: tx.to,
+            value: parseFloat(tx.value),
+            asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
+            category: tx.category,
+            timestamp: timestamp,
+            chain: chain.id,
+            rawContract: tx.rawContract
+          };
         })
-        .map(tx => ({
-          hash: tx.hash,
-          type: tx.from.toLowerCase() === address.toLowerCase() ? 'self' : 'received',
-          from: tx.from,
-          to: tx.to,
-          value: parseFloat(tx.value),
-          asset: tx.asset || nativeCurrencies[chain.id] || 'ETH',
-        category: tx.category,
-        timestamp: new Date(tx.metadata.blockTimestamp).getTime(),
-        chain: chain.id,
-        rawContract: tx.rawContract
-      }));
+        .filter(tx => tx !== null)
+        .sort((a, b) => b.timestamp - a.timestamp);
       
-      // Combine and sort by timestamp
-      const allTxs = [...sentTxs, ...receivedTxs]
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 50);
-      
-      console.log(`✅ ${chain.id}: Found ${allTxs.length} transactions`);
+      console.log(`✅ ${chain.id}: Found ${allTxs.length} transactions with real timestamps`);
       res.json({ transactions: allTxs });
       
     } catch (err) {
