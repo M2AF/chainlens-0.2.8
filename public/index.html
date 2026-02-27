@@ -259,8 +259,7 @@
           return;
         }
         
-        // Route through backend — has 10min cache + retry logic + Kraken/Gemini fallbacks
-        // Direct browser→CoinGecko gets rate-limited after the top-100 page load
+        // Route through backend — 10min cache, retry logic, Kraken/Gemini fallbacks
         try {
           console.log('🔍 Searching via backend for:', query);
           const res = await fetch(`/api/market/search/${encodeURIComponent(query)}`);
