@@ -713,17 +713,39 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
   const { mode, address } = req.params;
   try {
     const solPrice = await fetchUSDPrice('solana', 'So11111111111111111111111111111111111111112');
-    const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`, {
+    
+    // Add timestamp for cache-busting
+    const timestamp = Date.now();
+    const heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${API_KEYS.helius}`;
+    
+    // Method 1: Helius Enhanced API (might be cached/delayed for new tokens)
+    const heliusResponse = await fetch(heliusUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache'
+      },
       body: JSON.stringify({
-        jsonrpc: '2.0', id: 'sol-scan', method: 'getAssetsByOwner',
-        params: { ownerAddress: address, page: 1, limit: 100, options: { showFungible: mode === 'tokens', showNativeBalance: mode === 'tokens' } }
+        jsonrpc: '2.0', 
+        id: `sol-scan-${timestamp}`, 
+        method: 'getAssetsByOwner',
+        params: { 
+          ownerAddress: address, 
+          page: 1, 
+          limit: 1000, // Increased to catch all tokens
+          displayOptions: {
+            showFungible: mode === 'tokens',
+            showNativeBalance: mode === 'tokens'
+          }
+        }
       })
     });
-    const data = await response.json();
-    const items = data.result?.items || [];
-    const nativeBalance = data.result?.nativeBalance || null;
+    
+    const heliusData = await heliusResponse.json();
+    const items = heliusData.result?.items || [];
+    const nativeBalance = heliusData.result?.nativeBalance || null;
+    
+    console.log(`📊 Solana ${mode}: Helius returned ${items.length} items`);
 
     if (mode === 'tokens') {
       const tokens = [];
@@ -738,37 +760,148 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
             symbol: 'SOL',
             balance: solBalance.toFixed(4),
             usdPrice: solPrice,
-            nativePrice: '1.0000', // SOL in SOL = 1
+            nativePrice: '1.0000',
             totalValue: (solBalance * solPrice).toFixed(2),
-            image: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+            image: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111112/logo.png',
             chain: 'solana',
             isToken: true
           });
         }
       }
       
-      // Add SPL tokens
-      const splTokens = items.filter(i => i.interface === 'FungibleToken' || i.interface === 'FungibleAsset').map(t => {
-        const balanceNum = (t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0));
-        const usdPrice = t.token_info?.price_info?.price_per_token || 0;
-        const nativePrice = solPrice > 0 ? (usdPrice / solPrice) : 0; // Fixed: price per token in SOL
-        
-        return {
-          id: t.id,
-          name: t.content?.metadata?.name || 'Solana Token',
-          symbol: t.content?.metadata?.symbol || 'SPL',
-          balance: balanceNum.toFixed(4),
-          usdPrice: usdPrice,
-          nativePrice: nativePrice.toFixed(4), // Price per token in SOL
-          totalValue: (balanceNum * usdPrice).toFixed(2),
-          image: t.content?.links?.image || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
-          chain: 'solana',
-          isToken: true
-        };
-      });
+      // Add SPL tokens from Helius
+      const heliusTokens = items
+        .filter(i => i.interface === 'FungibleToken' || i.interface === 'FungibleAsset')
+        .map(t => {
+          const balanceNum = (t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0));
+          const usdPrice = t.token_info?.price_info?.price_per_token || 0;
+          const nativePrice = solPrice > 0 ? (usdPrice / solPrice) : 0;
+          
+          return {
+            id: t.id,
+            mint: t.id, // Store mint address
+            name: t.content?.metadata?.name || 'Solana Token',
+            symbol: t.content?.metadata?.symbol || 'SPL',
+            balance: balanceNum.toFixed(4),
+            usdPrice: usdPrice,
+            nativePrice: nativePrice.toFixed(4),
+            totalValue: (balanceNum * usdPrice).toFixed(2),
+            image: t.content?.links?.image || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111112/logo.png',
+            chain: 'solana',
+            isToken: true
+          };
+        })
+        .filter(t => parseFloat(t.balance) > 0);
       
-      tokens.push(...splTokens.filter(t => parseFloat(t.balance) > 0));
+      tokens.push(...heliusTokens);
+      
+      // Method 2: DIRECT RPC token account lookup (catches BRAND NEW tokens Helius hasn't indexed yet)
+      console.log(`🔍 Solana: Doing direct RPC token account lookup for newest tokens...`);
+      try {
+        const tokenAccountsResponse = await fetch(heliusUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: `token-accounts-${timestamp}`,
+            method: 'getTokenAccountsByOwner',
+            params: [
+              address,
+              { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' }, // SPL Token Program
+              { encoding: 'jsonParsed' }
+            ]
+          })
+        });
+        
+        const tokenAccountsData = await tokenAccountsResponse.json();
+        const tokenAccounts = tokenAccountsData.result?.value || [];
+        console.log(`📊 Solana: Direct RPC found ${tokenAccounts.length} token accounts`);
+        
+        // Get mints we already have from Helius
+        const existingMints = new Set(tokens.map(t => t.mint || t.id));
+        
+        // Process token accounts
+        const directTokens = await Promise.all(
+          tokenAccounts
+            .filter(account => {
+              const mint = account.account?.data?.parsed?.info?.mint;
+              const balance = account.account?.data?.parsed?.info?.tokenAmount?.uiAmount || 0;
+              return mint && balance > 0 && !existingMints.has(mint);
+            })
+            .slice(0, 50) // Limit to avoid too many lookups
+            .map(async (account) => {
+              try {
+                const mint = account.account.data.parsed.info.mint;
+                const balance = account.account.data.parsed.info.tokenAmount.uiAmount;
+                const decimals = account.account.data.parsed.info.tokenAmount.decimals;
+                
+                // Try to get metadata
+                let symbol = 'UNKNOWN';
+                let name = 'Unknown Token';
+                let image = 'https://via.placeholder.com/100/14F195/ffffff?text=?';
+                
+                // Try to fetch token metadata
+                try {
+                  const metadataResponse = await fetch(heliusUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      jsonrpc: '2.0',
+                      id: 'get-asset',
+                      method: 'getAsset',
+                      params: { id: mint }
+                    })
+                  });
+                  const metadata = await metadataResponse.json();
+                  if (metadata.result) {
+                    symbol = metadata.result.content?.metadata?.symbol || mint.substring(0, 6);
+                    name = metadata.result.content?.metadata?.name || 'New Token';
+                    image = metadata.result.content?.links?.image || image;
+                  }
+                } catch (e) {
+                  console.log(`  Unable to fetch metadata for ${mint}`);
+                }
+                
+                // Try to get price
+                const usdPrice = await fetchUSDPrice('solana', mint);
+                const nativePrice = solPrice > 0 ? (usdPrice / solPrice) : 0;
+                
+                console.log(`  ✅ Found NEW token via RPC: ${symbol} (${mint.substring(0, 8)}...) = ${balance}`);
+                
+                return {
+                  id: mint,
+                  mint: mint,
+                  name: name,
+                  symbol: symbol,
+                  balance: balance.toFixed(4),
+                  usdPrice: usdPrice,
+                  nativePrice: nativePrice.toFixed(4),
+                  totalValue: (balance * usdPrice).toFixed(2),
+                  image: image,
+                  chain: 'solana',
+                  isToken: true,
+                  isNew: true // Flag to indicate this was caught via direct RPC
+                };
+              } catch (e) {
+                console.error(`  Error processing token account:`, e.message);
+                return null;
+              }
+            })
+        );
+        
+        const validDirectTokens = directTokens.filter(t => t !== null);
+        if (validDirectTokens.length > 0) {
+          console.log(`  ✅ Added ${validDirectTokens.length} NEW tokens from direct RPC!`);
+          tokens.push(...validDirectTokens);
+        }
+        
+      } catch (rpcErr) {
+        console.error(`  ⚠️ Direct RPC token lookup failed:`, rpcErr.message);
+      }
+      
+      console.log(`✅ Solana: Returning ${tokens.length} total tokens`);
       res.json({ nfts: tokens });
+      
     } else {
       const nfts = items.filter(i => i.interface !== 'FungibleToken' && i.interface !== 'FungibleAsset').map(asset => ({
         id: asset.id,
@@ -848,11 +981,19 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
       console.log(`✅ Resolved ${address} → ${resolvedAddress}`);
       address = resolvedAddress;
     }
-    const adaPrice = await fetchCoinGeckoPrice('cardano'); // CoinGecko — DexScreener doesn't support Cardano
-    const addrRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}`, { headers: { project_id: API_KEYS.blockfrost } });
+    const adaPrice = await fetchCoinGeckoPrice('cardano');
+    
+    // Add cache-busting headers
+    const blockfrostHeaders = { 
+      'project_id': API_KEYS.blockfrost,
+      'Cache-Control': 'no-cache, no-store, must-revalidate'
+    };
+    
+    const addrRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/addresses/${address}`, { headers: blockfrostHeaders });
     if (addrRes.status === 404) return res.json({ nfts: [] });
     const addrData = await addrRes.json();
-    if (!addrData.stake_address) return res.json({ nfts: [] });
+    
+    console.log(`📊 Cardano ${mode}: Processing address ${address}`);
     
     const results = [];
     
@@ -867,7 +1008,7 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
           symbol: 'ADA',
           balance: adaBalance.toFixed(2),
           usdPrice: adaPrice,
-          nativePrice: '1.0000', // ADA in ADA = 1
+          nativePrice: '1.0000',
           totalValue: (adaBalance * adaPrice).toFixed(2),
           image: 'https://cryptologos.cc/logos/cardano-ada-logo.png',
           chain: 'cardano',
@@ -877,39 +1018,85 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
       }
     }
     
-    const assetsRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/accounts/${addrData.stake_address}/addresses/assets`, { headers: { project_id: API_KEYS.blockfrost } });
-    const assets = await assetsRes.json();
-    const tasks = assets.slice(0, 30).map(async (a) => {
-      const metaRes = await fetch(`https://cardano-mainnet.blockfrost.io/api/v0/assets/${a.unit}`, { headers: { project_id: API_KEYS.blockfrost } });
-      const meta = await metaRes.json();
-      const isNFT = parseInt(a.quantity) === 1;
-      if ((mode === 'tokens' && isNFT) || (mode === 'nfts' && !isNFT)) return null;
-      // Cardano token price: use known CoinGecko ID if available, else 0
-      const _ticker = meta.metadata?.ticker || meta.onchain_metadata?.ticker || '';
-      const _cgId = NATIVE_CG_IDS[_ticker?.toUpperCase()];
-      const usdPrice = _cgId ? await fetchCoinGeckoPrice(_cgId) : 0;
-      const balance = (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0));
-      const nativePrice = adaPrice > 0 ? (usdPrice / adaPrice) : 0; // Fixed: price per token in ADA
+    // Method 1: Get assets from stake address (standard approach)
+    let assets = [];
+    if (addrData.stake_address) {
+      const assetsRes = await fetch(
+        `https://cardano-mainnet.blockfrost.io/api/v0/accounts/${addrData.stake_address}/addresses/assets`, 
+        { headers: blockfrostHeaders }
+      );
+      assets = await assetsRes.json();
+      console.log(`  Blockfrost stake assets: ${assets.length} total`);
+    }
+    
+    // Method 2: ALSO check direct address amount field (catches BRAND NEW tokens not yet in stake endpoint)
+    if (addrData.amount && Array.isArray(addrData.amount)) {
+      const directAssets = addrData.amount.filter(a => a.unit !== 'lovelace' && a.quantity && parseInt(a.quantity) > 0);
+      console.log(`  Direct address assets: ${directAssets.length} found`);
       
-      let img = meta.onchain_metadata?.image || '';
-      if (Array.isArray(img)) img = img.join('');
-      const imageUrl = img ? (img.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}` : (img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`)) : '';
-      return {
-        id: a.unit,
-        name: meta.onchain_metadata?.name || meta.asset_name || 'Cardano Asset',
-        chain: 'cardano',
-        image: imageUrl || 'https://via.placeholder.com/400/0033AD/ffffff?text=ADA',
-        balance: mode === 'tokens' ? balance.toFixed(2) : null,
-        usdPrice: usdPrice,
-        nativePrice: nativePrice.toFixed(4), // Price per token in ADA
-        totalValue: (balance * usdPrice).toFixed(2),
-        symbol: meta.metadata?.ticker || '',
-        isToken: mode === 'tokens',
-        metadata: { traits: meta.onchain_metadata?.attributes || [], description: meta.onchain_metadata?.description || '' }
-      };
+      // Merge with stake assets, preferring direct address data (fresher)
+      const existingUnits = new Set(assets.map(a => a.unit));
+      for (const directAsset of directAssets) {
+        if (!existingUnits.has(directAsset.unit)) {
+          console.log(`    ✅ Found NEW asset via direct address check: ${directAsset.unit.substring(0, 16)}...`);
+          assets.push(directAsset);
+        }
+      }
+    }
+    
+    console.log(`  Total unique assets to process: ${assets.length}`);
+    
+    // Process ALL assets (removed .slice(0, 30) limit!)
+    const tasks = assets.map(async (a) => {
+      try {
+        const metaRes = await fetch(
+          `https://cardano-mainnet.blockfrost.io/api/v0/assets/${a.unit}`, 
+          { headers: blockfrostHeaders }
+        );
+        
+        if (!metaRes.ok) {
+          console.log(`  ⚠️ Unable to fetch metadata for ${a.unit}`);
+          return null;
+        }
+        
+        const meta = await metaRes.json();
+        const isNFT = parseInt(a.quantity) === 1;
+        if ((mode === 'tokens' && isNFT) || (mode === 'nfts' && !isNFT)) return null;
+        
+        // Cardano token price: use known CoinGecko ID if available, else 0
+        const _ticker = meta.metadata?.ticker || meta.onchain_metadata?.ticker || '';
+        const _cgId = NATIVE_CG_IDS[_ticker?.toUpperCase()];
+        const usdPrice = _cgId ? await fetchCoinGeckoPrice(_cgId) : 0;
+        const balance = (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0));
+        const nativePrice = adaPrice > 0 ? (usdPrice / adaPrice) : 0;
+        
+        let img = meta.onchain_metadata?.image || '';
+        if (Array.isArray(img)) img = img.join('');
+        const imageUrl = img ? (img.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}` : (img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`)) : '';
+        
+        return {
+          id: a.unit,
+          name: meta.onchain_metadata?.name || meta.asset_name || 'Cardano Asset',
+          chain: 'cardano',
+          image: imageUrl || 'https://via.placeholder.com/400/0033AD/ffffff?text=ADA',
+          balance: mode === 'tokens' ? balance.toFixed(2) : null,
+          usdPrice: usdPrice,
+          nativePrice: nativePrice.toFixed(4),
+          totalValue: (balance * usdPrice).toFixed(2),
+          symbol: meta.metadata?.ticker || _ticker || a.unit.substring(0, 6),
+          isToken: mode === 'tokens',
+          metadata: { traits: meta.onchain_metadata?.attributes || [], description: meta.onchain_metadata?.description || '' }
+        };
+      } catch (e) {
+        console.error(`  Error processing asset ${a.unit}:`, e.message);
+        return null;
+      }
     });
+    
     const taskResults = await Promise.all(tasks);
     results.push(...taskResults.filter(n => n !== null));
+    
+    console.log(`✅ Cardano: Returning ${results.length} ${mode}`);
     res.json({ nfts: results });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
