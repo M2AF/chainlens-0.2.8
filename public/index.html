@@ -1030,26 +1030,49 @@
                               src={nft.image || ''}
                               className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                               onError={(e) => {
+                                // Kill the handler immediately to prevent any loop
+                                e.currentTarget.onerror = null;
                                 const el = e.currentTarget;
-                                const sym = nft.symbol || '?';
-                                const tried = el.dataset.tried || '';
-                                // EVM: try Trust Wallet CDN (checksummed address)
-                                if (!tried.includes('tw') && nft.id?.startsWith('0x')) {
-                                  el.dataset.tried = tried + 'tw';
-                                  el.src = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${nft.id}/logo.png`;
-                                  return;
+                                const sym = (nft.symbol || '?').toUpperCase();
+                                const chain = nft.chain || '';
+
+                                // Build a prioritised list of fallback URLs to try
+                                const fallbacks = [];
+
+                                // EVM: Trust Wallet has logos for most ERC20s
+                                if (nft.id?.startsWith('0x')) {
+                                  fallbacks.push(`https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${nft.id}/logo.png`);
                                 }
-                                // Try CoinGecko search image via symbol
-                                if (!tried.includes('cg')) {
-                                  el.dataset.tried = tried + 'cg';
-                                  el.src = `https://assets.coingecko.com/coins/images/1/small/${sym.toLowerCase()}.png`;
-                                  return;
+                                // Cardano: try alternate IPFS gateway if original was cloudflare
+                                if (chain === 'cardano' && el.src.includes('cloudflare-ipfs')) {
+                                  fallbacks.push(el.src.replace('cloudflare-ipfs.com', 'ipfs.io'));
                                 }
-                                // Final: colored placeholder with symbol
-                                el.onerror = null;
-                                const colors = { solana:'14F195', cardano:'0033AD', ethereum:'627EEA', polygon:'8247E5', base:'0052FF' };
-                                const bg = colors[nft.chain] || '334155';
-                                el.src = `https://via.placeholder.com/400/${bg}/ffffff?text=${encodeURIComponent(sym)}`;
+                                // Cardano: try dweb.link gateway
+                                if (chain === 'cardano' && el.src.includes('ipfs')) {
+                                  const cid = el.src.split('/ipfs/')[1];
+                                  if (cid) fallbacks.push(`https://dweb.link/ipfs/${cid}`);
+                                }
+
+                                if (fallbacks.length > 0) {
+                                  // Try fallbacks sequentially via a simple retry chain
+                                  let idx = 0;
+                                  const tryNext = (imgEl) => {
+                                    if (idx >= fallbacks.length) {
+                                      // All failed — show colored placeholder, no more retries
+                                      imgEl.onerror = null;
+                                      const colors = { solana:'14F195', cardano:'0033AD', ethereum:'627EEA', polygon:'8247E5', base:'0052FF' };
+                                      imgEl.src = `https://via.placeholder.com/80/${colors[chain]||'334155'}/ffffff?text=${encodeURIComponent(sym)}`;
+                                      return;
+                                    }
+                                    imgEl.onerror = (ev) => { idx++; tryNext(ev.currentTarget); };
+                                    imgEl.src = fallbacks[idx++];
+                                  };
+                                  tryNext(el);
+                                } else {
+                                  // No fallbacks — show placeholder immediately
+                                  const colors = { solana:'14F195', cardano:'0033AD', ethereum:'627EEA', polygon:'8247E5', base:'0052FF' };
+                                  el.src = `https://via.placeholder.com/80/${colors[chain]||'334155'}/ffffff?text=${encodeURIComponent(sym)}`;
+                                }
                               }}
                             />
                             <div className={`absolute ${isListView ? 'top-1 left-1 px-1.5 py-0.5 text-[6px]' : 'top-4 left-4 px-3 py-1 text-[9px]'} rounded-full text-white font-bold tracking-widest uppercase backdrop-blur-md border border-white/20 shadow-lg z-10 ${chainStyles[nft.chain]?.color}`}>

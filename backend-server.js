@@ -684,7 +684,7 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
           || nft.token_uri
           || '';
         const imageUrl = rawImage.startsWith('ipfs://')
-          ? `https://ipfs.io/ipfs/${rawImage.replace('ipfs://', '')}`
+          ? `https://cloudflare-ipfs.com/ipfs/${rawImage.replace('ipfs://', '')}`
           : rawImage;
         return {
           id: `${nft.token_address}-${nft.token_id}`,
@@ -1076,9 +1076,9 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
         if (Array.isArray(img)) img = img.join('');
         if (typeof img !== 'string' || !img.trim()) continue;
         img = img.trim();
-        if (img.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${img.slice(7)}`;
+        if (img.startsWith('ipfs://')) return `https://cloudflare-ipfs.com/ipfs/${img.slice(7)}`;
         if (img.startsWith('http'))   return img;
-        if (img.length >= 46)         return `https://ipfs.io/ipfs/${img}`;
+        if (img.length >= 46)         return `https://cloudflare-ipfs.com/ipfs/${img}`;
       }
       return '';
     };
