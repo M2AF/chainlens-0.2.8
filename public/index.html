@@ -259,18 +259,18 @@
           return;
         }
         
-        // Route through backend — has 10min cache + retry + fallbacks (Kraken, Gemini)
-        // Direct browser→CoinGecko calls get rate-limited after top-100 loads
+        // Route through backend — has 10min cache + retry logic + Kraken/Gemini fallbacks
+        // Direct browser→CoinGecko gets rate-limited after the top-100 page load
         try {
           console.log('🔍 Searching via backend for:', query);
           const res = await fetch(`/api/market/search/${encodeURIComponent(query)}`);
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            alert(err.error || 'Coin not found. Try the full name (e.g. "Monad") or ticker (e.g. "MON")');
+            alert(err.error || 'Coin not found. Try full name (e.g. "Monad") or ticker (e.g. "MON")');
             return;
           }
           const coin = await res.json();
-          console.log('✅ Found:', coin.name, '$' + coin.current_price, 'via', coin.source || 'backend');
+          console.log('✅ Found:', coin.name, '#' + coin.market_cap_rank, '$' + coin.current_price, 'via', coin.source);
           setMarketData(prev => {
             const filtered = prev.filter(c => c.id !== coin.id);
             return [coin, ...filtered];
