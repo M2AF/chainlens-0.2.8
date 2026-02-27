@@ -777,16 +777,23 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
           const usdPrice = t.token_info?.price_info?.price_per_token || 0;
           const nativePrice = solPrice > 0 ? (usdPrice / solPrice) : 0;
           
+          // Image: try all Helius fields in priority order
+          const solImage = t.content?.links?.image
+            || t.content?.links?.image_url
+            || t.content?.files?.[0]?.cdn_uri
+            || t.content?.files?.[0]?.uri
+            || t.token_info?.image_url
+            || '';
           return {
             id: t.id,
-            mint: t.id, // Store mint address
-            name: t.content?.metadata?.name || 'Solana Token',
-            symbol: t.content?.metadata?.symbol || 'SPL',
+            mint: t.id,
+            name: t.content?.metadata?.name || t.token_info?.symbol || 'Solana Token',
+            symbol: t.content?.metadata?.symbol || t.token_info?.symbol || 'SPL',
             balance: balanceNum.toFixed(4),
             usdPrice: usdPrice,
             nativePrice: nativePrice.toFixed(4),
             totalValue: (balanceNum * usdPrice).toFixed(2),
-            image: t.content?.links?.image || 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111112/logo.png',
+            image: solImage || `https://via.placeholder.com/100/14F195/000000?text=${encodeURIComponent(t.content?.metadata?.symbol || 'SOL')}`,
             chain: 'solana',
             isToken: true
           };
@@ -855,8 +862,12 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
                   const metadata = await metadataResponse.json();
                   if (metadata.result) {
                     symbol = metadata.result.content?.metadata?.symbol || mint.substring(0, 6);
-                    name = metadata.result.content?.metadata?.name || 'New Token';
-                    image = metadata.result.content?.links?.image || image;
+                    name   = metadata.result.content?.metadata?.name   || 'New Token';
+                    image  = metadata.result.content?.links?.image
+                          || metadata.result.content?.links?.image_url
+                          || metadata.result.content?.files?.[0]?.cdn_uri
+                          || metadata.result.content?.files?.[0]?.uri
+                          || `https://via.placeholder.com/100/14F195/000000?text=${encodeURIComponent(symbol)}`;
                   }
                 } catch (e) {
                   console.log(`  Unable to fetch metadata for ${mint}`);
@@ -1046,6 +1057,39 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
     
     console.log(`  Total unique assets to process: ${assets.length}`);
     
+    // Decode hex-encoded Blockfrost asset_name to readable UTF-8
+    const decodeAssetName = (hex) => {
+      if (!hex) return '';
+      try {
+        const str = Buffer.from(hex, 'hex').toString('utf8');
+        // Only return if it's printable ASCII — otherwise it's binary data
+        return /^[ -~]+$/.test(str) ? str.trim() : '';
+      } catch { return ''; }
+    };
+
+    // Resolve IPFS/HTTP image from all known Cardano metadata fields
+    const resolveCardanoImage = (raw) => {
+      // Check all possible image fields in priority order
+      const candidates = [
+        raw.onchain_metadata?.image,
+        raw.onchain_metadata?.logo,
+        raw.onchain_metadata?.icon,
+        raw.metadata?.logo,
+        raw.metadata?.url,
+      ];
+      for (let img of candidates) {
+        if (!img) continue;
+        if (Array.isArray(img)) img = img.join('');
+        if (typeof img !== 'string' || !img.trim()) continue;
+        img = img.trim();
+        if (img.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${img.slice(7)}`;
+        if (img.startsWith('http'))   return img;
+        // Raw IPFS CID (v0 = 46 chars, v1 = longer)
+        if (img.length >= 46)         return `https://ipfs.io/ipfs/${img}`;
+      }
+      return '';
+    };
+
     // Process ALL assets (removed .slice(0, 30) limit!)
     const tasks = assets.map(async (a) => {
       try {
@@ -1062,28 +1106,54 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
         const meta = await metaRes.json();
         const isNFT = parseInt(a.quantity) === 1;
         if ((mode === 'tokens' && isNFT) || (mode === 'nfts' && !isNFT)) return null;
-        
-        // Cardano token price: use known CoinGecko ID if available, else 0
+
+        // Name: try onchain name first, then decode hex asset_name
+        const decodedName = decodeAssetName(meta.asset_name);
+        let onchainName = meta.onchain_metadata?.name;
+        if (Array.isArray(onchainName)) onchainName = onchainName.join('');
+        const tokenName = (onchainName || meta.metadata?.name || decodedName || 'Cardano Asset').toString().trim();
+
+        // Symbol: prefer metadata ticker, fallback to decoded name truncated
         const _ticker = meta.metadata?.ticker || meta.onchain_metadata?.ticker || '';
+        const symbol = _ticker || decodedName.substring(0, 8) || a.unit.substring(56, 62);
+
+        // Price: CoinGecko for known tickers
         const _cgId = NATIVE_CG_IDS[_ticker?.toUpperCase()];
-        const usdPrice = _cgId ? await fetchCoinGeckoPrice(_cgId) : 0;
+        let usdPrice = _cgId ? await fetchCoinGeckoPrice(_cgId) : 0;
+
+        // Stablecoin heuristic — USDCx, iUSD, USDA, DJED etc.
+        if (usdPrice === 0) {
+          const su = symbol.toUpperCase();
+          if (su.includes('USD') || su === 'IUSD' || su === 'USDA' || su === 'DJED') usdPrice = 1.0;
+        }
+
+        // DexScreener fallback using policy ID (first 56 chars of unit)
+        if (usdPrice === 0 && a.unit.length > 56) {
+          try {
+            const dsRes = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${a.unit.substring(0, 56)}`);
+            if (dsRes.ok) {
+              const dsData = await dsRes.json();
+              const pair = dsData.pairs?.find(p => p.chainId === 'cardano') || dsData.pairs?.[0];
+              if (pair?.priceUsd) usdPrice = parseFloat(pair.priceUsd);
+            }
+          } catch {}
+        }
+
         const balance = (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0));
         const nativePrice = adaPrice > 0 ? (usdPrice / adaPrice) : 0;
-        
-        let img = meta.onchain_metadata?.image || '';
-        if (Array.isArray(img)) img = img.join('');
-        const imageUrl = img ? (img.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}` : (img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`)) : '';
+        const imageUrl = resolveCardanoImage(meta)
+          || `https://via.placeholder.com/400/0033AD/ffffff?text=${encodeURIComponent(symbol)}`;
         
         return {
           id: a.unit,
-          name: meta.onchain_metadata?.name || meta.asset_name || 'Cardano Asset',
+          name: tokenName,
           chain: 'cardano',
-          image: imageUrl || 'https://via.placeholder.com/400/0033AD/ffffff?text=ADA',
+          image: imageUrl,
           balance: mode === 'tokens' ? balance.toFixed(2) : null,
           usdPrice: usdPrice,
           nativePrice: nativePrice.toFixed(4),
           totalValue: (balance * usdPrice).toFixed(2),
-          symbol: meta.metadata?.ticker || _ticker || a.unit.substring(0, 6),
+          symbol: symbol,
           isToken: mode === 'tokens',
           metadata: { traits: meta.onchain_metadata?.attributes || [], description: meta.onchain_metadata?.description || '' }
         };
