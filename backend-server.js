@@ -940,143 +940,136 @@ app.get('/api/market/top100', async (req, res) => {
 });
 
 // Enhanced search with Kraken and Gemini fallback
-// Cache search results for 5 minutes to avoid hammering CoinGecko on repeat searches
+// Search cache — 10 minute TTL prevents repeat rate-limit hits
 const _searchCache = {};
 
 app.get('/api/market/search/:query', async (req, res) => {
-  const query = req.params.query;
-  const cacheKey = query.toLowerCase().trim();
+  const query = req.params.query.trim();
+  const cacheKey = query.toLowerCase();
+  console.log(`🔍 Search: ${query}`);
 
-  // Return cached result if fresh
-  if (_searchCache[cacheKey] && Date.now() - _searchCache[cacheKey].ts < 300000) {
-    console.log(`📦 Search cache hit: ${query}`);
+  // Serve from cache if fresh (10 min)
+  if (_searchCache[cacheKey] && Date.now() - _searchCache[cacheKey].ts < 600000) {
+    console.log(`📦 Cache hit: ${query}`);
     return res.json(_searchCache[cacheKey].data);
   }
-  console.log(`🔍 Searching for: ${query}`);
-  
+
+  const cache = (data) => { _searchCache[cacheKey] = { data, ts: Date.now() }; return data; };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  // ── Step 1: CoinGecko /search → get proper slug ─────────────────────────
+  // This is the only source that resolves names ("monad") to proper market data
+  let cgSlug = null;
+  let cgSymbol = null;
   try {
-    // Step 1: Try CoinGecko search (most comprehensive)
-    console.log('  📊 Trying CoinGecko...');
-    try {
-      const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
-      
-      // Check for rate limiting
-      if (searchRes.status === 429) {
-        console.log('  ⚠️  CoinGecko rate limited, trying Kraken...');
-        throw new Error('Rate limited');
+    const r = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
+    if (r.status === 429) {
+      // Rate limited — wait 2s and retry once
+      console.log('  ⚠️ CoinGecko /search rate limited, retrying in 2s...');
+      await sleep(2000);
+      const r2 = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
+      if (r2.ok) {
+        const d = await r2.json();
+        cgSlug = d.coins?.[0]?.id || null;
+        cgSymbol = d.coins?.[0]?.symbol || null;
       }
-      
-      const searchData = await searchRes.json();
-      const hit = searchData.coins?.[0];
-      
-      if (hit) {
-        const marketRes = await fetch(
-          `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
+    } else if (r.ok) {
+      const d = await r.json();
+      cgSlug = d.coins?.[0]?.id || null;
+      cgSymbol = d.coins?.[0]?.symbol || null;
+    }
+  } catch (e) { console.log('  ❌ CoinGecko /search:', e.message); }
+
+  // ── Step 2: CoinGecko /coins/markets — full data with sparkline ─────────
+  if (cgSlug) {
+    try {
+      // Small delay to avoid back-to-back CG calls hitting rate limit
+      await sleep(500);
+      const r = await fetch(
+        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${cgSlug}&sparkline=true&price_change_percentage=24h`
+      );
+      if (r.ok) {
+        const d = await r.json();
+        if (d?.length > 0) {
+          const coin = { ...d[0], source: 'CoinGecko', symbol: d[0].symbol.toUpperCase() };
+          console.log(`  ✅ CoinGecko: ${coin.name} $${coin.current_price}`);
+          return res.json(cache(coin));
+        }
+      } else if (r.status === 429) {
+        // /markets rate limited — fall back to simple/price for just the number
+        console.log('  ⚠️ CoinGecko /markets rate limited, using simple/price...');
+        await sleep(1000);
+        const rSimple = await fetch(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${cgSlug}&vs_currencies=usd&include_24hr_change=true`
         );
-        
-        if (marketRes.status === 429) {
-          console.log('  ⚠️  CoinGecko rate limited, trying Kraken...');
-          throw new Error('Rate limited');
+        if (rSimple.ok) {
+          const dSimple = await rSimple.json();
+          const price = dSimple[cgSlug]?.usd;
+          const change = dSimple[cgSlug]?.usd_24h_change || 0;
+          if (price) {
+            const coin = {
+              id: cgSlug, symbol: (cgSymbol || query).toUpperCase(),
+              name: cgSlug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' '),
+              current_price: price, price_change_percentage_24h: change,
+              market_cap: 0, market_cap_rank: null,
+              image: `https://assets.coingecko.com/coins/images/1/small/bitcoin.png`,
+              sparkline_in_7d: null, source: 'CoinGecko (simple)'
+            };
+            console.log(`  ✅ CoinGecko simple: ${coin.name} $${price}`);
+            return res.json(cache(coin));
+          }
         }
-        
-        const marketData = await marketRes.json();
-        
-        if (marketData && marketData.length > 0) {
-          const coin = marketData[0];
-          console.log(`  ✅ CoinGecko: ${coin.name} (${coin.id}) $${coin.current_price}`);
-          const cgResult = { ...coin, source: 'CoinGecko', symbol: coin.symbol.toUpperCase() };
-          _searchCache[cacheKey] = { data: cgResult, ts: Date.now() };
-          return res.json(cgResult);
-        }
       }
-    } catch (e) {
-      console.log(`  ❌ CoinGecko: ${e.message}`);
-    }
-    
-    // Step 2: Try Kraken
-    console.log('  🐙 Trying Kraken...');
-    try {
-      const krakenSymbol = query.toUpperCase() + 'USD';
-      const krakenRes = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${krakenSymbol}`);
-      const krakenData = await krakenRes.json();
-      
-      if (krakenData.result && Object.keys(krakenData.result).length > 0) {
-        const pairKey = Object.keys(krakenData.result)[0];
-        const ticker = krakenData.result[pairKey];
-        const price = parseFloat(ticker.c[0]);
-        const high24h = parseFloat(ticker.h[1]);
-        const low24h = parseFloat(ticker.l[1]);
-        const volume24h = parseFloat(ticker.v[1]);
-        const change24h = ((price - parseFloat(ticker.o)) / parseFloat(ticker.o)) * 100;
-        
-        console.log(`  ✅ Kraken: ${query.toUpperCase()} $${price}`);
-        const krakenResult = {
-          id: query.toLowerCase(),
-          symbol: query.toUpperCase(),
-          name: query.toUpperCase(),
-          current_price: price,
-          price_change_percentage_24h: change24h,
-          high_24h: high24h,
-          low_24h: low24h,
-          total_volume: volume24h,
-          market_cap: 0,
-          market_cap_rank: null,
-          image: `https://cryptoicons.org/api/icon/${query.toLowerCase()}/50`,
-          sparkline_in_7d: null,
-          source: 'Kraken'
-        };
-        _searchCache[cacheKey] = { data: krakenResult, ts: Date.now() };
-        return res.json(krakenResult);
-      } else {
-        console.log(`  ❌ Kraken: ${krakenData.error?.[0] || 'Pair not found'}`);
-      }
-    } catch (e) {
-      console.log(`  ❌ Kraken error: ${e.message}`);
-    }
-    
-    // Step 3: Try Gemini
-    console.log('  💎 Trying Gemini...');
-    try {
-      const geminiSymbol = query.toLowerCase() + 'usd';
-      const geminiRes = await fetch(`https://api.gemini.com/v1/pubticker/${geminiSymbol}`);
-      
-      if (geminiRes.ok) {
-        const geminiData = await geminiRes.json();
-        const price = parseFloat(geminiData.last);
-        const change = parseFloat(geminiData.change || 0);
-        const volume = parseFloat(geminiData.volume?.[query.toUpperCase()] || 0);
-        
-        console.log(`  ✅ Gemini: ${query.toUpperCase()} $${price}`);
-        return res.json({
-          id: query.toLowerCase(),
-          symbol: query.toUpperCase(),
-          name: query.toUpperCase(),
-          current_price: price,
-          price_change_percentage_24h: change,
-          high_24h: 0,
-          low_24h: 0,
-          total_volume: volume,
-          market_cap: 0,
-          market_cap_rank: null,
-          image: `https://cryptoicons.org/api/icon/${query.toLowerCase()}/50`,
-          sparkline_in_7d: null,
-          source: 'Gemini'
-        });
-      } else {
-        console.log(`  ❌ Gemini: HTTP ${geminiRes.status}`);
-      }
-    } catch (e) {
-      console.log(`  ❌ Gemini error: ${e.message}`);
-    }
-    
-    // Step 4: No results from any source
-    console.log(`  ❌ Not found on any exchange`);
-    return res.status(404).json({ error: `Coin "${query}" not found on any supported exchange` });
-    
-  } catch (err) {
-    console.error(`❌ Search error for ${query}:`, err.message);
-    res.status(500).json({ error: err.message });
+    } catch (e) { console.log('  ❌ CoinGecko /markets:', e.message); }
   }
+
+  // ── Step 3: Kraken — works for major coins by ticker ────────────────────
+  // Use the CG symbol if we got it, otherwise use raw query
+  const tickerGuess = (cgSymbol || query).toUpperCase();
+  try {
+    const r = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${tickerGuess}USD`);
+    const d = await r.json();
+    if (d.result && Object.keys(d.result).length > 0) {
+      const tk = d.result[Object.keys(d.result)[0]];
+      const price = parseFloat(tk.c[0]);
+      const change24h = ((price - parseFloat(tk.o)) / parseFloat(tk.o)) * 100;
+      const coin = {
+        id: cgSlug || query.toLowerCase(), symbol: tickerGuess,
+        name: cgSlug ? cgSlug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ') : tickerGuess,
+        current_price: price, price_change_percentage_24h: change24h,
+        high_24h: parseFloat(tk.h[1]), low_24h: parseFloat(tk.l[1]),
+        total_volume: parseFloat(tk.v[1]), market_cap: 0, market_cap_rank: null,
+        image: `https://cryptoicons.org/api/icon/${tickerGuess.toLowerCase()}/50`,
+        sparkline_in_7d: null, source: 'Kraken'
+      };
+      console.log(`  ✅ Kraken: ${tickerGuess} $${price}`);
+      return res.json(cache(coin));
+    }
+  } catch (e) { console.log('  ❌ Kraken:', e.message); }
+
+  // ── Step 4: Gemini ───────────────────────────────────────────────────────
+  try {
+    const r = await fetch(`https://api.gemini.com/v1/pubticker/${tickerGuess.toLowerCase()}usd`);
+    if (r.ok) {
+      const d = await r.json();
+      const price = parseFloat(d.last);
+      if (price > 0) {
+        const coin = {
+          id: cgSlug || query.toLowerCase(), symbol: tickerGuess,
+          name: cgSlug ? cgSlug.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ') : tickerGuess,
+          current_price: price, price_change_percentage_24h: 0,
+          market_cap: 0, market_cap_rank: null,
+          image: `https://cryptoicons.org/api/icon/${tickerGuess.toLowerCase()}/50`,
+          sparkline_in_7d: null, source: 'Gemini'
+        };
+        console.log(`  ✅ Gemini: ${tickerGuess} $${price}`);
+        return res.json(cache(coin));
+      }
+    }
+  } catch (e) { console.log('  ❌ Gemini:', e.message); }
+
+  console.log(`  ❌ All sources exhausted for: ${query}`);
+  res.status(404).json({ error: `"${query}" not found. Try the full name (e.g. "monad") or ticker (e.g. "MON")` });
 });
 
 // Enhanced chart with multiple timeframes and Kraken/Gemini fallback
