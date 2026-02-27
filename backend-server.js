@@ -940,8 +940,18 @@ app.get('/api/market/top100', async (req, res) => {
 });
 
 // Enhanced search with Kraken and Gemini fallback
+// Cache search results for 5 minutes to avoid hammering CoinGecko on repeat searches
+const _searchCache = {};
+
 app.get('/api/market/search/:query', async (req, res) => {
   const query = req.params.query;
+  const cacheKey = query.toLowerCase().trim();
+
+  // Return cached result if fresh
+  if (_searchCache[cacheKey] && Date.now() - _searchCache[cacheKey].ts < 300000) {
+    console.log(`📦 Search cache hit: ${query}`);
+    return res.json(_searchCache[cacheKey].data);
+  }
   console.log(`🔍 Searching for: ${query}`);
   
   try {
@@ -974,11 +984,9 @@ app.get('/api/market/search/:query', async (req, res) => {
         if (marketData && marketData.length > 0) {
           const coin = marketData[0];
           console.log(`  ✅ CoinGecko: ${coin.name} (${coin.id}) $${coin.current_price}`);
-          return res.json({
-            ...coin,
-            source: 'CoinGecko',
-            symbol: coin.symbol.toUpperCase()
-          });
+          const cgResult = { ...coin, source: 'CoinGecko', symbol: coin.symbol.toUpperCase() };
+          _searchCache[cacheKey] = { data: cgResult, ts: Date.now() };
+          return res.json(cgResult);
         }
       }
     } catch (e) {
@@ -1002,7 +1010,7 @@ app.get('/api/market/search/:query', async (req, res) => {
         const change24h = ((price - parseFloat(ticker.o)) / parseFloat(ticker.o)) * 100;
         
         console.log(`  ✅ Kraken: ${query.toUpperCase()} $${price}`);
-        return res.json({
+        const krakenResult = {
           id: query.toLowerCase(),
           symbol: query.toUpperCase(),
           name: query.toUpperCase(),
@@ -1016,7 +1024,9 @@ app.get('/api/market/search/:query', async (req, res) => {
           image: `https://cryptoicons.org/api/icon/${query.toLowerCase()}/50`,
           sparkline_in_7d: null,
           source: 'Kraken'
-        });
+        };
+        _searchCache[cacheKey] = { data: krakenResult, ts: Date.now() };
+        return res.json(krakenResult);
       } else {
         console.log(`  ❌ Kraken: ${krakenData.error?.[0] || 'Pair not found'}`);
       }

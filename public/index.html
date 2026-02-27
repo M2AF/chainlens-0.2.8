@@ -259,40 +259,24 @@
           return;
         }
         
-        // Search CoinGecko — returns proper slug IDs needed for chart API
+        // Route through backend — has caching + fallbacks (Kraken, Gemini) when CoinGecko rate-limits
         try {
-          console.log('🔍 Searching CoinGecko for:', query);
-          const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
-          const searchData = await searchRes.json();
-          const hit = searchData.coins?.[0];
-          
-          if (!hit) {
-            alert('Coin not found on CoinGecko. Try the full name (e.g., "canton network", "monad")');
+          console.log('🔍 Searching via backend for:', query);
+          const res = await fetch(`/api/market/search/${encodeURIComponent(query)}`);
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(err.error || 'Coin not found. Try the ticker (e.g. "MON") or full name (e.g. "Monad")');
             return;
           }
-          
-          console.log('✅ CoinGecko search hit:', hit.id, hit.name, hit.symbol);
-          
-          // Fetch full market data using the proper CoinGecko slug
-          const detailRes = await fetch(
-            `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${hit.id}&sparkline=true&price_change_percentage=24h`
-          );
-          const detailData = await detailRes.json();
-          
-          if (detailData && detailData.length > 0) {
-            const coin = detailData[0];
-            setMarketData(prev => {
-              // Remove any existing entry with same id to avoid duplicates
-              const filtered = prev.filter(c => c.id !== coin.id);
-              return [coin, ...filtered];
-            });
-            setMarketSearch('');
-            console.log('✅ Added to market list:', coin.name, '$' + coin.current_price);
-          } else {
-            alert('Could not load market data for that coin.');
-          }
+          const coin = await res.json();
+          console.log('✅ Found:', coin.name, '(' + coin.id + ')', '$' + coin.current_price, 'via', coin.source || 'backend');
+          setMarketData(prev => {
+            const filtered = prev.filter(c => c.id !== coin.id);
+            return [coin, ...filtered];
+          });
+          setMarketSearch('');
         } catch (e) {
-          console.error('❌ CoinGecko search failed:', e);
+          console.error('❌ Search failed:', e);
           alert('Search failed. Please try again.');
         }
       };
