@@ -329,7 +329,6 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
           nativePrice: nativePrice.toFixed(4), // Price per token in native currency
           totalValue: (balance * usdPrice).toFixed(2),
           image: metadata.logo
-            // Trust Wallet asset list covers thousands of ERC20s including PIXL
             || `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${token.contractAddress}/logo.png`
             || '',
           chain: chainId,
@@ -684,7 +683,7 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
           || nft.token_uri
           || '';
         const imageUrl = rawImage.startsWith('ipfs://')
-          ? `https://cloudflare-ipfs.com/ipfs/${rawImage.replace('ipfs://', '')}`
+          ? `https://ipfs.io/ipfs/${rawImage.replace('ipfs://', '')}`
           : rawImage;
         return {
           id: `${nft.token_address}-${nft.token_id}`,
@@ -864,11 +863,7 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
                   if (metadata.result) {
                     symbol = metadata.result.content?.metadata?.symbol || mint.substring(0, 6);
                     name = metadata.result.content?.metadata?.name || 'New Token';
-                    image = metadata.result.content?.links?.image
-                          || metadata.result.content?.links?.image_url
-                          || metadata.result.content?.files?.[0]?.cdn_uri
-                          || metadata.result.content?.files?.[0]?.uri
-                          || '';
+                    image = metadata.result.content?.links?.image || image;
                   }
                 } catch (e) {
                   console.log(`  Unable to fetch metadata for ${mint}`);
@@ -1058,6 +1053,7 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
     
     console.log(`  Total unique assets to process: ${assets.length}`);
     
+    // Decode Blockfrost hex asset_name → readable UTF-8 string
     const decodeAssetName = (hex) => {
       if (!hex) return '';
       try {
@@ -1066,24 +1062,34 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
       } catch { return ''; }
     };
 
-    const resolveCardanoImage = (meta) => {
-      const candidates = [
-        meta.onchain_metadata?.image, meta.onchain_metadata?.logo,
-        meta.onchain_metadata?.icon,  meta.metadata?.logo, meta.metadata?.url,
+    // Resolve image from ALL known Cardano metadata locations.
+    // Handles: onchain IPFS, metadata registry base64, HTTP URLs.
+    const resolveCardanoImage = (meta, symbol) => {
+      const raw = [
+        meta.onchain_metadata?.image,
+        meta.onchain_metadata?.logo,
+        meta.onchain_metadata?.icon,
+        meta.metadata?.logo,   // ← CIP-26 registry: base64 PNG or HTTP for tokens like USDCx, HUNT, COPI
+        meta.metadata?.url,
       ];
-      for (let img of candidates) {
+      for (let img of raw) {
         if (!img) continue;
         if (Array.isArray(img)) img = img.join('');
-        if (typeof img !== 'string' || !img.trim()) continue;
+        if (typeof img !== 'string') continue;
         img = img.trim();
+        if (!img) continue;
+        // base64 data URI — return as-is
+        if (img.startsWith('data:')) return img;
+        // IPFS — use Cloudflare gateway (faster than ipfs.io)
         if (img.startsWith('ipfs://')) return `https://cloudflare-ipfs.com/ipfs/${img.slice(7)}`;
         if (img.startsWith('http'))   return img;
+        // Raw CID without prefix
         if (img.length >= 46)         return `https://cloudflare-ipfs.com/ipfs/${img}`;
       }
       return '';
     };
 
-    // Process ALL assets (removed .slice(0, 30) limit!)
+    // Process ALL assets
     const tasks = assets.map(async (a) => {
       try {
         const metaRes = await fetch(
@@ -1096,40 +1102,38 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
         const isNFT = parseInt(a.quantity) === 1;
         if ((mode === 'tokens' && isNFT) || (mode === 'nfts' && !isNFT)) return null;
 
+        // Name: prefer onchain, then decode hex asset_name
         const decodedName = decodeAssetName(meta.asset_name);
         let onchainName = meta.onchain_metadata?.name || meta.metadata?.name || '';
         if (Array.isArray(onchainName)) onchainName = onchainName.join('');
         const tokenName = (onchainName || decodedName || 'Cardano Asset').toString().trim();
 
+        // Symbol: prefer metadata ticker
         const _ticker = meta.metadata?.ticker || meta.onchain_metadata?.ticker || '';
         const symbol = _ticker || decodedName.substring(0, 8) || a.unit.substring(56, 62);
 
-        const _cgId = NATIVE_CG_IDS[_ticker?.toUpperCase()];
-        let usdPrice = _cgId ? await fetchCoinGeckoPrice(_cgId) : 0;
+        // Price — everything wrapped so no failure can hide the token
+        let usdPrice = 0;
+        try {
+          const _cgId = NATIVE_CG_IDS[_ticker?.toUpperCase()];
+          if (_cgId) usdPrice = await fetchCoinGeckoPrice(_cgId);
+        } catch {}
 
+        // Stablecoin heuristic (USDCx, iUSD, DJED, USDA etc.)
         if (usdPrice === 0) {
           const su = symbol.toUpperCase();
           if (su.includes('USD') || su === 'IUSD' || su === 'USDA' || su === 'DJED') usdPrice = 1.0;
         }
-        if (usdPrice === 0 && a.unit.length > 56) {
-          try {
-            const dsRes = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${a.unit.substring(0, 56)}`);
-            if (dsRes.ok) {
-              const dd = await dsRes.json();
-              const pair = dd.pairs?.find(p => p.chainId === 'cardano') || dd.pairs?.[0];
-              if (pair?.priceUsd) usdPrice = parseFloat(pair.priceUsd);
-            }
-          } catch {}
-        }
 
         const balance = (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0));
         const nativePrice = adaPrice > 0 ? (usdPrice / adaPrice) : 0;
+        const imageUrl = resolveCardanoImage(meta, symbol);
 
         return {
           id: a.unit,
           name: tokenName,
           chain: 'cardano',
-          image: resolveCardanoImage(meta) || '',
+          image: imageUrl,   // empty string is fine — frontend onerror handles it
           balance: mode === 'tokens' ? balance.toFixed(2) : null,
           usdPrice, nativePrice: nativePrice.toFixed(4),
           totalValue: (balance * usdPrice).toFixed(2),

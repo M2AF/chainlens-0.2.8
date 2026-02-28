@@ -1025,53 +1025,25 @@
                             <button onClick={(e) => toggleSpam(e, nft)} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/80 hover:bg-red-600 text-white backdrop-blur-sm border border-white/10">🚫</button>
                         </div>
                         <div className={isListView ? "w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 relative" : "aspect-square relative overflow-hidden bg-slate-100"}>
-                            {/* Smart image with fallback chain: original → Trust Wallet CDN → CoinGecko → placeholder */}
                             <img
                               src={nft.image || ''}
                               className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                               onError={(e) => {
-                                // Kill the handler immediately to prevent any loop
-                                e.currentTarget.onerror = null;
                                 const el = e.currentTarget;
-                                const sym = (nft.symbol || '?').toUpperCase();
-                                const chain = nft.chain || '';
-
-                                // Build a prioritised list of fallback URLs to try
-                                const fallbacks = [];
-
-                                // EVM: Trust Wallet has logos for most ERC20s
-                                if (nft.id?.startsWith('0x')) {
-                                  fallbacks.push(`https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${nft.id}/logo.png`);
-                                }
-                                // Cardano: try alternate IPFS gateway if original was cloudflare
-                                if (chain === 'cardano' && el.src.includes('cloudflare-ipfs')) {
-                                  fallbacks.push(el.src.replace('cloudflare-ipfs.com', 'ipfs.io'));
-                                }
-                                // Cardano: try dweb.link gateway
-                                if (chain === 'cardano' && el.src.includes('ipfs')) {
-                                  const cid = el.src.split('/ipfs/')[1];
-                                  if (cid) fallbacks.push(`https://dweb.link/ipfs/${cid}`);
-                                }
-
-                                if (fallbacks.length > 0) {
-                                  // Try fallbacks sequentially via a simple retry chain
-                                  let idx = 0;
-                                  const tryNext = (imgEl) => {
-                                    if (idx >= fallbacks.length) {
-                                      // All failed — show colored placeholder, no more retries
-                                      imgEl.onerror = null;
-                                      const colors = { solana:'14F195', cardano:'0033AD', ethereum:'627EEA', polygon:'8247E5', base:'0052FF' };
-                                      imgEl.src = `https://via.placeholder.com/80/${colors[chain]||'334155'}/ffffff?text=${encodeURIComponent(sym)}`;
-                                      return;
-                                    }
-                                    imgEl.onerror = (ev) => { idx++; tryNext(ev.currentTarget); };
-                                    imgEl.src = fallbacks[idx++];
-                                  };
-                                  tryNext(el);
+                                el.onerror = null; // prevent any loop
+                                const sym = encodeURIComponent((nft.symbol || '?').toUpperCase());
+                                const colors = {solana:'14F195',cardano:'0033AD',ethereum:'627EEA',polygon:'8247E5',base:'0052FF',solana:'14F195'};
+                                const bg = colors[nft.chain] || '334155';
+                                // EVM: try Trust Wallet CDN before giving up
+                                if (nft.id?.startsWith('0x') && !el.src.includes('trustwallet')) {
+                                  el.onerror = (e2) => { e2.currentTarget.onerror = null; e2.currentTarget.src = `https://via.placeholder.com/80/${bg}/ffffff?text=${sym}`; };
+                                  el.src = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${nft.id}/logo.png`;
+                                } else if (nft.image?.includes('cloudflare-ipfs') && !el.src.includes('ipfs.io')) {
+                                  // Cloudflare IPFS failed — try ipfs.io as backup
+                                  el.onerror = (e2) => { e2.currentTarget.onerror = null; e2.currentTarget.src = `https://via.placeholder.com/80/${bg}/ffffff?text=${sym}`; };
+                                  el.src = nft.image.replace('cloudflare-ipfs.com', 'ipfs.io');
                                 } else {
-                                  // No fallbacks — show placeholder immediately
-                                  const colors = { solana:'14F195', cardano:'0033AD', ethereum:'627EEA', polygon:'8247E5', base:'0052FF' };
-                                  el.src = `https://via.placeholder.com/80/${colors[chain]||'334155'}/ffffff?text=${encodeURIComponent(sym)}`;
+                                  el.src = `https://via.placeholder.com/80/${bg}/ffffff?text=${sym}`;
                                 }
                               }}
                             />
@@ -1081,12 +1053,7 @@
                         </div>
                         <div className={isListView ? "flex-1 flex items-center justify-between overflow-hidden min-w-0" : "p-5 text-center"}>
                             <div className={isListView ? "flex flex-col min-w-0 flex-1 pr-4" : "flex flex-col items-center mb-2"}>
-                                <p className={`font-heading font-bold uppercase tracking-tight shrink-0 ${isListView ? 'text-base md:text-lg truncate' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`} style={{maxWidth: isListView ? '100%' : 'auto'}} title={nft.name}>{(() => {
-                                  const nm = nft.name || '';
-                                  if (/^[0-9a-fA-F]{20,}$/.test(nm)) return nft.symbol || 'Unknown Asset';
-                                  if (/^\d{10,}$/.test(nm)) return nft.symbol || 'Unknown Asset';
-                                  return nm;
-                                })()}</p>
+                                <p className={`font-heading font-bold uppercase tracking-tight shrink-0 ${isListView ? 'text-base md:text-lg truncate' : 'text-sm'} ${darkMode ? 'text-white' : 'text-slate-900'}`} style={{maxWidth: isListView ? '100%' : 'auto'}} title={nft.name}>{/^[0-9a-fA-F]{20,}$/.test(nft.name || '') ? (nft.symbol || 'Unknown Asset') : (nft.name || 'Unknown')}</p>
                                 {isListView && <span className="text-[10px] font-bold opacity-40 uppercase tracking-widest truncate" style={{maxWidth: '100%'}}>{nft.symbol || 'ASSET'}</span>}
                             </div>
                             {(nft.isToken || tokenMode) && (
