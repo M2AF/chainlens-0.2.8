@@ -1030,16 +1030,14 @@
                               className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                               onError={(e) => {
                                 const el = e.currentTarget;
-                                el.onerror = null; // prevent any loop
+                                el.onerror = null;
                                 const sym = encodeURIComponent((nft.symbol || '?').toUpperCase());
-                                const colors = {solana:'14F195',cardano:'0033AD',ethereum:'627EEA',polygon:'8247E5',base:'0052FF',solana:'14F195'};
+                                const colors = {solana:'14F195',cardano:'0033AD',ethereum:'627EEA',polygon:'8247E5',base:'0052FF'};
                                 const bg = colors[nft.chain] || '334155';
-                                // EVM: try Trust Wallet CDN before giving up
                                 if (nft.id?.startsWith('0x') && !el.src.includes('trustwallet')) {
                                   el.onerror = (e2) => { e2.currentTarget.onerror = null; e2.currentTarget.src = `https://via.placeholder.com/80/${bg}/ffffff?text=${sym}`; };
                                   el.src = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${nft.id}/logo.png`;
                                 } else if (nft.image?.includes('cloudflare-ipfs') && !el.src.includes('ipfs.io')) {
-                                  // Cloudflare IPFS failed — try ipfs.io as backup
                                   el.onerror = (e2) => { e2.currentTarget.onerror = null; e2.currentTarget.src = `https://via.placeholder.com/80/${bg}/ffffff?text=${sym}`; };
                                   el.src = nft.image.replace('cloudflare-ipfs.com', 'ipfs.io');
                                 } else {
