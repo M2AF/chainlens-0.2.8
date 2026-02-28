@@ -86,29 +86,19 @@ const toNativePrice = (usdValue, nativeUsdPrice) =>
 
 // Image cache — 24hr TTL (logos rarely change)
 const _imageCache = {};
-
-// Fetch token image from CoinGecko /search — returns the 'large' image URL.
-// Falls back to 'small' or 'thumb'. One call per unique symbol, cached 24hrs.
 const fetchTokenImage = async (symbol) => {
   if (!symbol) return '';
   const key = symbol.toLowerCase();
-  if (_imageCache[key] !== undefined) return _imageCache[key]; // cached (even empty string)
+  if (_imageCache[key] !== undefined) return _imageCache[key];
   try {
     const r = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(symbol)}`);
     if (!r.ok) { _imageCache[key] = ''; return ''; }
     const d = await r.json();
-    const hit = d.coins?.find(c =>
-      c.symbol?.toLowerCase() === key ||   // exact symbol match first
-      c.name?.toLowerCase() === key
-    ) || d.coins?.[0];                     // fallback to top result
+    const hit = d.coins?.find(c => c.symbol?.toLowerCase() === key) || d.coins?.[0];
     const img = hit?.large || hit?.small || hit?.thumb || '';
     _imageCache[key] = img;
-    if (img) console.log(`  🖼️  CoinGecko image for ${symbol}: ${img.substring(0, 60)}...`);
     return img;
-  } catch (e) {
-    _imageCache[key] = '';
-    return '';
-  }
+  } catch { _imageCache[key] = ''; return ''; }
 };
 
 // --- DOMAIN RESOLUTION ---
@@ -791,7 +781,7 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
             usdPrice: solPrice,
             nativePrice: '1.0000',
             totalValue: (solBalance * solPrice).toFixed(2),
-            image: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111112/logo.png',
+            image: 'https://assets.coingecko.com/coins/images/4128/small/solana.png',
             chain: 'solana',
             isToken: true
           });
@@ -799,36 +789,33 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
       }
       
       // Add SPL tokens from Helius
-      const heliusRaw = items
+      const heliusTokens = items
         .filter(i => i.interface === 'FungibleToken' || i.interface === 'FungibleAsset')
-        .filter(t => {
-          const bal = t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0);
-          return bal > 0;
-        });
-
-      const heliusTokens = (await Promise.all(heliusRaw.map(async (t) => {
-        const balanceNum = (t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0));
-        const usdPrice = t.token_info?.price_info?.price_per_token || 0;
-        const nativePrice = solPrice > 0 ? (usdPrice / solPrice) : 0;
-        const sym = t.content?.metadata?.symbol;
-        const imgFromHelius = t.content?.links?.image
-          || t.content?.links?.image_url
-          || t.content?.files?.[0]?.cdn_uri
-          || t.content?.files?.[0]?.uri
-          || t.token_info?.image_url
-          || '';
-        const image = imgFromHelius || await fetchTokenImage(sym);
-        return {
-          id: t.id,
-          mint: t.id,
-          name: t.content?.metadata?.name || 'Solana Token',
-          symbol: sym || 'SPL',
-          balance: balanceNum.toFixed(4),
-          usdPrice, nativePrice: nativePrice.toFixed(4),
-          totalValue: (balanceNum * usdPrice).toFixed(2),
-          image, chain: 'solana', isToken: true
-        };
-      }))).filter(t => t !== null);
+        .map(t => {
+          const balanceNum = (t.token_info?.balance / Math.pow(10, t.token_info?.decimals || 0));
+          const usdPrice = t.token_info?.price_info?.price_per_token || 0;
+          const nativePrice = solPrice > 0 ? (usdPrice / solPrice) : 0;
+          
+          return {
+            id: t.id,
+            mint: t.id, // Store mint address
+            name: t.content?.metadata?.name || 'Solana Token',
+            symbol: t.content?.metadata?.symbol || 'SPL',
+            balance: balanceNum.toFixed(4),
+            usdPrice: usdPrice,
+            nativePrice: nativePrice.toFixed(4),
+            totalValue: (balanceNum * usdPrice).toFixed(2),
+            image: t.content?.links?.image
+              || t.content?.links?.image_url
+              || t.content?.files?.[0]?.cdn_uri
+              || t.content?.files?.[0]?.uri
+              || t.token_info?.image_url
+              || '',
+            chain: 'solana',
+            isToken: true
+          };
+        })
+        .filter(t => parseFloat(t.balance) > 0);
       
       tokens.push(...heliusTokens);
       
@@ -1083,45 +1070,90 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
     
     console.log(`  Total unique assets to process: ${assets.length}`);
     
+    // Decode Blockfrost hex asset_name → readable UTF-8
+    const decodeAssetName = (hex) => {
+      if (!hex) return '';
+      try {
+        const str = Buffer.from(hex, 'hex').toString('utf8');
+        return /^[ -~]+$/.test(str) ? str.trim() : '';
+      } catch { return ''; }
+    };
+
+    // Resolve image from all known Cardano metadata locations
+    const resolveCardanoImage = (meta) => {
+      const candidates = [
+        meta.onchain_metadata?.image, meta.onchain_metadata?.logo,
+        meta.onchain_metadata?.icon,
+        meta.metadata?.logo,   // CIP-26 registry: base64 or URL (USDCx, HUNT, COPI live here)
+        meta.metadata?.url,
+      ];
+      for (let img of candidates) {
+        if (!img) continue;
+        if (Array.isArray(img)) img = img.join('');
+        if (typeof img !== 'string') continue;
+        img = img.trim();
+        if (!img) continue;
+        if (img.startsWith('data:'))  return img;
+        if (img.startsWith('ipfs://')) return `https://cloudflare-ipfs.com/ipfs/${img.slice(7)}`;
+        if (img.startsWith('http'))   return img;
+        if (img.length >= 46)         return `https://cloudflare-ipfs.com/ipfs/${img}`;
+      }
+      return '';
+    };
+
     // Process ALL assets (removed .slice(0, 30) limit!)
     const tasks = assets.map(async (a) => {
       try {
         const metaRes = await fetch(
-          `https://cardano-mainnet.blockfrost.io/api/v0/assets/${a.unit}`, 
+          `https://cardano-mainnet.blockfrost.io/api/v0/assets/${a.unit}`,
           { headers: blockfrostHeaders }
         );
-        
-        if (!metaRes.ok) {
-          console.log(`  ⚠️ Unable to fetch metadata for ${a.unit}`);
-          return null;
-        }
-        
+        if (!metaRes.ok) return null;
+
         const meta = await metaRes.json();
         const isNFT = parseInt(a.quantity) === 1;
         if ((mode === 'tokens' && isNFT) || (mode === 'nfts' && !isNFT)) return null;
-        
-        // Cardano token price: use known CoinGecko ID if available, else 0
+
+        // ── Name: onchain first, then decode hex asset_name ──────────────────
+        const decodedName = decodeAssetName(meta.asset_name);
+        let onchainName = meta.onchain_metadata?.name || meta.metadata?.name || '';
+        if (Array.isArray(onchainName)) onchainName = onchainName.join('');
+        const tokenName = (onchainName || decodedName || 'Cardano Asset').toString().trim();
+
+        // ── Symbol ───────────────────────────────────────────────────────────
         const _ticker = meta.metadata?.ticker || meta.onchain_metadata?.ticker || '';
-        const _cgId = NATIVE_CG_IDS[_ticker?.toUpperCase()];
-        const usdPrice = _cgId ? await fetchCoinGeckoPrice(_cgId) : 0;
+        const symbol = _ticker || decodedName.substring(0, 8) || a.unit.substring(56, 62);
+
+        // ── Price — isolated so a failure never hides the token ───────────────
+        let usdPrice = 0;
+        try {
+          const _cgId = NATIVE_CG_IDS[_ticker?.toUpperCase()];
+          if (_cgId) usdPrice = await fetchCoinGeckoPrice(_cgId);
+        } catch {}
+        // Stablecoin heuristic (USDCx, iUSD, DJED, USDA…)
+        if (usdPrice === 0) {
+          const su = symbol.toUpperCase();
+          if (su.includes('USD') || su === 'IUSD' || su === 'USDA' || su === 'DJED') usdPrice = 1.0;
+        }
+
+        // ── Image — symbol is defined before this call ────────────────────────
+        let imageUrl = resolveCardanoImage(meta);
+        if (!imageUrl) {
+          try { imageUrl = await fetchTokenImage(symbol); } catch {}
+        }
+
         const balance = (parseInt(a.quantity) / Math.pow(10, meta.metadata?.decimals || 0));
         const nativePrice = adaPrice > 0 ? (usdPrice / adaPrice) : 0;
-        
-        let img = meta.onchain_metadata?.image || '';
-        if (Array.isArray(img)) img = img.join('');
-        const imageUrl = img ? (img.startsWith('ipfs://') ? `https://ipfs.io/ipfs/${img.replace('ipfs://', '')}` : (img.startsWith('http') ? img : `https://ipfs.io/ipfs/${img}`)) : '';
-        
+
         return {
           id: a.unit,
-          name: meta.onchain_metadata?.name || meta.asset_name || 'Cardano Asset',
+          name: tokenName,
           chain: 'cardano',
-          image: imageUrl || await fetchTokenImage(symbol),
+          image: imageUrl,
           balance: mode === 'tokens' ? balance.toFixed(2) : null,
-          usdPrice: usdPrice,
-          nativePrice: nativePrice.toFixed(4),
+          usdPrice, nativePrice: nativePrice.toFixed(4),
           totalValue: (balance * usdPrice).toFixed(2),
-          symbol: meta.metadata?.ticker || _ticker || a.unit.substring(0, 6),
-          isToken: mode === 'tokens',
+          symbol, isToken: mode === 'tokens',
           metadata: { traits: meta.onchain_metadata?.attributes || [], description: meta.onchain_metadata?.description || '' }
         };
       } catch (e) {

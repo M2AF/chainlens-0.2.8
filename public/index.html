@@ -1037,9 +1037,9 @@
                                 if (nft.id?.startsWith('0x') && !el.src.includes('trustwallet')) {
                                   el.onerror = (e2) => { e2.currentTarget.onerror = null; e2.currentTarget.src = `https://via.placeholder.com/80/${bg}/ffffff?text=${sym}`; };
                                   el.src = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${nft.id}/logo.png`;
-                                } else if (nft.image?.includes('cloudflare-ipfs') && !el.src.includes('ipfs.io')) {
+                                } else if (el.src.includes('cloudflare-ipfs') && !el.src.includes('ipfs.io')) {
                                   el.onerror = (e2) => { e2.currentTarget.onerror = null; e2.currentTarget.src = `https://via.placeholder.com/80/${bg}/ffffff?text=${sym}`; };
-                                  el.src = nft.image.replace('cloudflare-ipfs.com', 'ipfs.io');
+                                  el.src = el.src.replace('cloudflare-ipfs.com', 'ipfs.io');
                                 } else {
                                   el.src = `https://via.placeholder.com/80/${bg}/ffffff?text=${sym}`;
                                 }
