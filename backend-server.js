@@ -88,8 +88,34 @@ const dbUpsertUser = async ({ provider, provider_id, display_name, avatar_url, e
 const dbGetUserById = async (id) => {
   if (!supabase) return null;
   const { data } = await supabase
-    .from('cl_users').select('*, cl_wallets(*)').eq('id', id).single();
+    .from('cl_users')
+    .select('*, cl_wallets(*), cl_linked_accounts(*)')
+    .eq('id', id).single();
   return data;
+};
+
+const dbLinkSocialAccount = async (userId, { provider, provider_id, display_name, avatar_url, email }) => {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('cl_linked_accounts')
+    .upsert({ user_id: userId, provider, provider_id, display_name, avatar_url, email },
+             { onConflict: 'provider,provider_id' })
+    .select().single();
+  if (error) throw error;
+  return data;
+};
+
+// Find a user who already has this social account linked
+const dbFindUserBySocial = async (provider, provider_id) => {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from('cl_linked_accounts')
+    .select('user_id')
+    .eq('provider', provider)
+    .eq('provider_id', provider_id)
+    .single();
+  if (!data) return null;
+  return dbGetUserById(data.user_id);
 };
 
 const dbLinkWallet = async (userId, { chain, address }) => {
@@ -308,7 +334,10 @@ app.post('/api/auth/wallet-login', async (req, res) => {
 app.get('/auth/google', (req, res) => {
   if (!process.env.GOOGLE_CLIENT_ID) return res.redirect(`${FRONTEND_URL}/?auth_error=google_not_configured`);
   const state = crypto.randomBytes(16).toString('hex');
-  _oauthStates[state] = { expires: Date.now() + 10 * 60 * 1000 };
+  _oauthStates[state] = {
+    expires: Date.now() + 10 * 60 * 1000,
+    linkToken: req.query.link_token || null  // present = link mode, absent = login mode
+  };
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID,
     redirect_uri: process.env.GOOGLE_CALLBACK_URL || `${FRONTEND_URL}/auth/google/callback`,
@@ -344,9 +373,51 @@ app.get('/auth/google/callback', async (req, res) => {
     });
     const info = await infoRes.json();
 
-    const user = supabase
-      ? await dbUpsertUser({ provider: 'google', provider_id: info.id, display_name: info.name, avatar_url: info.picture, email: info.email })
-      : { id: crypto.createHash('sha256').update('google:' + info.id).digest('hex').substring(0, 24), display_name: info.name, avatar_url: info.picture };
+    const stateData = _oauthStates[state] || {};
+    const linkToken = stateData.linkToken;
+    let user;
+
+    if (supabase) {
+      if (linkToken) {
+        // LINK MODE: add Google to an existing logged-in account
+        try {
+          const claims = jwt.verify(linkToken, JWT_SECRET);
+          user = await dbGetUserById(claims.sub);
+          if (!user) throw new Error('User not found');
+          await dbLinkSocialAccount(user.id, {
+            provider: 'google', provider_id: info.id,
+            display_name: info.name, avatar_url: info.picture, email: info.email
+          });
+          await supabase.from('cl_users').update({
+            avatar_url: user.avatar_url || info.picture,
+            email: user.email || info.email
+          }).eq('id', user.id);
+          const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
+          return res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}&linked=google`);
+        } catch (e) {
+          console.error('Google link error:', e);
+          return res.redirect(`${FRONTEND_URL}/?auth_error=link_failed`);
+        }
+      } else {
+        // LOGIN MODE: find existing linked account or create new user
+        const existing = await dbFindUserBySocial('google', info.id);
+        if (existing) {
+          user = existing;
+          await dbLinkSocialAccount(user.id, {
+            provider: 'google', provider_id: info.id,
+            display_name: info.name, avatar_url: info.picture, email: info.email
+          });
+        } else {
+          user = await dbUpsertUser({ provider: 'google', provider_id: info.id, display_name: info.name, avatar_url: info.picture, email: info.email });
+          await dbLinkSocialAccount(user.id, {
+            provider: 'google', provider_id: info.id,
+            display_name: info.name, avatar_url: info.picture, email: info.email
+          });
+        }
+      }
+    } else {
+      user = { id: crypto.createHash('sha256').update('google:' + info.id).digest('hex').substring(0, 24), display_name: info.name, avatar_url: info.picture };
+    }
 
     const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
     res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}`);
@@ -360,7 +431,10 @@ app.get('/auth/google/callback', async (req, res) => {
 app.get('/auth/discord', (req, res) => {
   if (!process.env.DISCORD_CLIENT_ID) return res.redirect(`${FRONTEND_URL}/?auth_error=discord_not_configured`);
   const state = crypto.randomBytes(16).toString('hex');
-  _oauthStates[state] = { expires: Date.now() + 10 * 60 * 1000 };
+  _oauthStates[state] = {
+    expires: Date.now() + 10 * 60 * 1000,
+    linkToken: req.query.link_token || null  // present = link mode, absent = login mode
+  };
   const params = new URLSearchParams({
     client_id: process.env.DISCORD_CLIENT_ID,
     redirect_uri: process.env.DISCORD_CALLBACK_URL || `${FRONTEND_URL}/auth/discord/callback`,
@@ -397,9 +471,51 @@ app.get('/auth/discord/callback', async (req, res) => {
       ? `https://cdn.discordapp.com/avatars/${info.id}/${info.avatar}.png`
       : `https://cdn.discordapp.com/embed/avatars/${parseInt(info.discriminator || 0) % 5}.png`;
 
-    const user = supabase
-      ? await dbUpsertUser({ provider: 'discord', provider_id: info.id, display_name: info.global_name || info.username, avatar_url: avatar, email: info.email })
-      : { id: crypto.createHash('sha256').update('discord:' + info.id).digest('hex').substring(0, 24), display_name: info.global_name || info.username, avatar_url: avatar };
+    const stateData = _oauthStates[state] || {};
+    const linkToken = stateData.linkToken;
+    const discordName = info.global_name || info.username;
+    let user;
+
+    if (supabase) {
+      if (linkToken) {
+        // LINK MODE: add Discord to an existing logged-in account
+        try {
+          const claims = jwt.verify(linkToken, JWT_SECRET);
+          user = await dbGetUserById(claims.sub);
+          if (!user) throw new Error('User not found');
+          await dbLinkSocialAccount(user.id, {
+            provider: 'discord', provider_id: info.id,
+            display_name: discordName, avatar_url: avatar, email: info.email
+          });
+          await supabase.from('cl_users').update({
+            avatar_url: user.avatar_url || avatar
+          }).eq('id', user.id);
+          const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
+          return res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}&linked=discord`);
+        } catch (e) {
+          console.error('Discord link error:', e);
+          return res.redirect(`${FRONTEND_URL}/?auth_error=link_failed`);
+        }
+      } else {
+        // LOGIN MODE: find existing linked account or create new user
+        const existing = await dbFindUserBySocial('discord', info.id);
+        if (existing) {
+          user = existing;
+          await dbLinkSocialAccount(user.id, {
+            provider: 'discord', provider_id: info.id,
+            display_name: discordName, avatar_url: avatar, email: info.email
+          });
+        } else {
+          user = await dbUpsertUser({ provider: 'discord', provider_id: info.id, display_name: discordName, avatar_url: avatar, email: info.email });
+          await dbLinkSocialAccount(user.id, {
+            provider: 'discord', provider_id: info.id,
+            display_name: discordName, avatar_url: avatar, email: info.email
+          });
+        }
+      }
+    } else {
+      user = { id: crypto.createHash('sha256').update('discord:' + info.id).digest('hex').substring(0, 24), display_name: discordName, avatar_url: avatar };
+    }
 
     const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
     res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}`);
