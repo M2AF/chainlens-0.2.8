@@ -362,18 +362,59 @@
         return { address, signedSig };
       });
 
-      // ── Cardano (Eternl / Nami / Vespr / Lace) ────────────────────────────
+      // ── Cardano hex → bech32 address converter (no extra npm lib needed) ──
+      const cardanoBech32 = (hexAddr) => {
+        try {
+          const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+          const bytes = hexAddr.match(/.{1,2}/g).map(b => parseInt(b, 16));
+          const hrp = 'addr';
+          let acc = 0, bits = 0;
+          const data5 = [];
+          for (const b of bytes) {
+            acc = (acc << 8) | b; bits += 8;
+            while (bits >= 5) { bits -= 5; data5.push((acc >> bits) & 31); }
+          }
+          if (bits > 0) data5.push((acc << (5 - bits)) & 31);
+          const GEN = [0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3];
+          const polymod = (vals) => {
+            let chk = 1;
+            for (const v of vals) {
+              const top = chk >> 25; chk = (chk & 0x1ffffff) << 5 ^ v;
+              for (let i = 0; i < 5; i++) if ((top >> i) & 1) chk ^= GEN[i];
+            } return chk;
+          };
+          const hrpExpand = (h) => {
+            const r = [];
+            for (const c of h) r.push(c.charCodeAt(0) >> 5);
+            r.push(0);
+            for (const c of h) r.push(c.charCodeAt(0) & 31);
+            return r;
+          };
+          const vals = [...hrpExpand(hrp), ...data5, 0,0,0,0,0,0];
+          const poly = polymod(vals) ^ 1;
+          const chk = Array.from({length:6}, (_,i) => (poly >> (5*(5-i))) & 31);
+          return hrp + '1' + [...data5, ...chk].map(d => CHARSET[d]).join('');
+        } catch(e) { return hexAddr; } // fallback: return raw hex if conversion fails
+      };
+
+      // ── Cardano (Vespr / Eternl / Nami / Lace) — Vespr listed first ──────
       const connectCardano = () => connectWallet('cardano', async (nonce) => {
-        const wName = ['eternl','nami','vespr','lace','flint'].find(w => window.cardano?.[w]);
-        if (!wName) throw new Error('No Cardano wallet found. Install Eternl or Nami.');
+        const wName = ['vespr','eternl','nami','lace','flint'].find(w => window.cardano?.[w]);
+        if (!wName) throw new Error('No Cardano wallet found. Install Vespr or Eternl.');
         const api = await window.cardano[wName].enable();
-        const addrs = await api.getUsedAddresses();
-        const address = addrs[0] || (await api.getChangeAddress());
+        // getUsedAddresses() returns hex-encoded bytes — must convert to bech32 addr1q...
+        const rawAddrs = await api.getUsedAddresses();
+        const rawHex = rawAddrs.length > 0 ? rawAddrs[0] : await api.getChangeAddress();
+        // If already bech32 (starts with 'addr'), use as-is; otherwise convert
+        const address = (typeof rawHex === 'string' && rawHex.startsWith('addr'))
+          ? rawHex
+          : cardanoBech32(rawHex);
         if (!nonce) return { address };
         const message = `ChainLens login\nAddress: ${address}\nNonce: ${nonce}`;
         const hexMsg = Array.from(new TextEncoder().encode(message))
           .map(b => b.toString(16).padStart(2,'0')).join('');
-        const { signature: signedSig, key } = await api.signData(address, hexMsg);
+        // signData needs the raw wallet format (rawHex), not our converted bech32
+        const { signature: signedSig, key } = await api.signData(rawHex, hexMsg);
         return { address, signedSig, key };
       });
 
@@ -1582,9 +1623,9 @@
                           className="social-btn flex flex-col items-center gap-2 py-5 px-4 rounded-2xl border-2 font-bold text-sm disabled:opacity-50 border-blue-500/30 hover:border-blue-500 hover:bg-blue-500/5">
                           <span className="text-3xl">₳</span>
                           <span className="text-xs font-bold uppercase tracking-widest text-blue-400">
-                            {walletConnecting === 'cardano' ? 'Connecting…' : 'Eternl / Cardano'}
+                            {walletConnecting === 'cardano' ? 'Connecting…' : 'Vespr / Eternl / Cardano'}
                           </span>
-                          <span className={`text-[9px] opacity-50 text-center ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Cardano network</span>
+                          <span className={`text-[9px] opacity-50 text-center ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Vespr, Eternl, Nami, Lace</span>
                         </button>
                       </div>
 
@@ -1716,18 +1757,37 @@
                         <div className={`pt-6 border-t ${darkMode ? 'border-slate-800' : 'border-slate-100'}`}>
                           <p className={`text-[10px] font-bold uppercase tracking-widest mb-4 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>Connect Another Wallet</p>
                           <div className="flex flex-wrap gap-3">
-                            <button onClick={connectEVM} disabled={!!walletConnecting}
-                              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${darkMode ? 'border-orange-500/30 text-orange-400 hover:bg-orange-500/10' : 'border-orange-300 text-orange-500 hover:bg-orange-50'}`}>
-                              🦊 {walletConnecting === 'evm' ? 'Connecting…' : 'Add EVM Wallet'}
-                            </button>
-                            <button onClick={connectSolana} disabled={!!walletConnecting}
-                              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${darkMode ? 'border-purple-500/30 text-purple-400 hover:bg-purple-500/10' : 'border-purple-300 text-purple-500 hover:bg-purple-50'}`}>
-                              👻 {walletConnecting === 'solana' ? 'Connecting…' : 'Add Solana Wallet'}
-                            </button>
-                            <button onClick={connectCardano} disabled={!!walletConnecting}
-                              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${darkMode ? 'border-blue-500/30 text-blue-400 hover:bg-blue-500/10' : 'border-blue-300 text-blue-500 hover:bg-blue-50'}`}>
-                              ₳ {walletConnecting === 'cardano' ? 'Connecting…' : 'Add Cardano Wallet'}
-                            </button>
+                            {(() => {
+                              const hasEVM = (userProfile?.cl_wallets||[]).some(w => w.chain === 'evm');
+                              const hasSol = (userProfile?.cl_wallets||[]).some(w => w.chain === 'solana');
+                              const hasAda = (userProfile?.cl_wallets||[]).some(w => w.chain === 'cardano');
+                              return (<>
+                                <button onClick={connectEVM} disabled={!!walletConnecting}
+                                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${
+                                    hasEVM
+                                      ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'
+                                      : darkMode ? 'border-orange-500/30 text-orange-400 hover:bg-orange-500/10' : 'border-orange-300 text-orange-500 hover:bg-orange-50'
+                                  }`}>
+                                  🦊 {walletConnecting === 'evm' ? 'Connecting…' : hasEVM ? '✓ EVM Connected · Add Another' : 'Add EVM Wallet'}
+                                </button>
+                                <button onClick={connectSolana} disabled={!!walletConnecting}
+                                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${
+                                    hasSol
+                                      ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'
+                                      : darkMode ? 'border-purple-500/30 text-purple-400 hover:bg-purple-500/10' : 'border-purple-300 text-purple-500 hover:bg-purple-50'
+                                  }`}>
+                                  👻 {walletConnecting === 'solana' ? 'Connecting…' : hasSol ? '✓ Solana Connected · Add Another' : 'Add Solana Wallet'}
+                                </button>
+                                <button onClick={connectCardano} disabled={!!walletConnecting}
+                                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${
+                                    hasAda
+                                      ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'
+                                      : darkMode ? 'border-blue-500/30 text-blue-400 hover:bg-blue-500/10' : 'border-blue-300 text-blue-500 hover:bg-blue-50'
+                                  }`}>
+                                  ₳ {walletConnecting === 'cardano' ? 'Connecting…' : hasAda ? '✓ Cardano Connected · Add Another' : 'Add Cardano Wallet (Vespr / Eternl)'}
+                                </button>
+                              </>);
+                            })()}
                           </div>
                         </div>
                       </div>
