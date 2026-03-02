@@ -1111,7 +1111,15 @@
               </div>
             </div>
 
-            <div className="flex flex-col md:flex-row items-center justify-center gap-6 mb-10">
+            {/* Dark mode toggle — fixed top-right */}
+            <div className={`fixed top-4 right-4 z-50 flex items-center space-x-3 px-4 py-2.5 rounded-2xl border backdrop-blur-md transition-all ${darkMode ? 'bg-slate-900/80 border-slate-700' : 'bg-white/80 border-slate-200 shadow-md'}`}>
+                <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
+                <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full cursor-pointer ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                    <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                </div>
+            </div>
+
+            <div className="flex justify-center mb-10">
                 <div className={`flex p-1 rounded-2xl border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 shadow-md'}`}>
                     <button onClick={() => setActiveTab('portfolio')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'portfolio' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Wallet Scanner</button>
                     <button onClick={() => setActiveTab('swap')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'swap' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Swap Hub</button>
@@ -1120,13 +1128,6 @@
                       Profile
                       {userProfile && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-slate-900"></span>}
                     </button>
-                </div>
-
-                <div className="flex items-center space-x-3 bg-black/5 px-4 py-3 rounded-2xl border border-white/5">
-                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-                    <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                        <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </div>
                 </div>
             </div>
 
