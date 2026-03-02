@@ -5,6 +5,103 @@ const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const path = require('path');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+
+// ─── Supabase (optional — only active if env vars are set) ────────────────────
+let supabase = null;
+if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+  const { createClient } = require('@supabase/supabase-js');
+  supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+  console.log('✅ Supabase connected');
+} else {
+  console.warn('⚠️  SUPABASE_URL / SUPABASE_SERVICE_KEY missing — profile features disabled');
+}
+
+// ─── Ethers for EVM signature verification ────────────────────────────────────
+let ethersVerify = null;
+try {
+  const { ethers } = require('ethers');
+  // Works for both ethers v5 (utils.verifyMessage) and v6 (verifyMessage)
+  ethersVerify = ethers.verifyMessage
+    ? (msg, sig) => ethers.verifyMessage(msg, sig)
+    : (msg, sig) => ethers.utils.verifyMessage(msg, sig);
+  console.log('✅ ethers loaded for EVM signature verification');
+} catch (e) { console.warn('⚠️  ethers not installed — EVM sig verification skipped'); }
+
+// ─── TweetNaCl for Solana signature verification ──────────────────────────────
+let nacl = null;
+try { nacl = require('tweetnacl'); console.log('✅ tweetnacl loaded'); }
+catch (e) { console.warn('⚠️  tweetnacl not installed — Solana sig verification skipped'); }
+
+// ─── Inline base58 decoder (Solana pubkey decode, no heavy dep) ───────────────
+const BASE58_ALPHA = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const base58Decode = (input) => {
+  let bytes = [0];
+  for (const char of input) {
+    const val = BASE58_ALPHA.indexOf(char);
+    if (val < 0) throw new Error('Invalid base58 char: ' + char);
+    let carry = val;
+    for (let i = 0; i < bytes.length; i++) {
+      carry += bytes[i] * 58; bytes[i] = carry & 0xff; carry >>= 8;
+    }
+    while (carry > 0) { bytes.push(carry & 0xff); carry >>= 8; }
+  }
+  for (const char of input) { if (char !== '1') break; bytes.push(0); }
+  return Buffer.from(bytes.reverse());
+};
+
+const JWT_SECRET = process.env.JWT_SECRET || 'chainlens-dev-secret-CHANGE-IN-PRODUCTION';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:10000';
+
+// ─── In-memory nonce store (auto-cleaned every 5 min) ────────────────────────
+const _authNonces = {}; // { address_lower: { nonce, expires } }
+const _oauthStates = {}; // { state: { expires } }
+setInterval(() => {
+  const now = Date.now();
+  Object.keys(_authNonces).forEach(k => { if (_authNonces[k].expires < now) delete _authNonces[k]; });
+  Object.keys(_oauthStates).forEach(k => { if (_oauthStates[k].expires < now) delete _oauthStates[k]; });
+}, 5 * 60 * 1000);
+
+// ─── Auth middleware ──────────────────────────────────────────────────────────
+const requireAuth = (req, res, next) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'No token provided' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (e) { res.status(401).json({ error: 'Invalid or expired token' }); }
+};
+
+// ─── DB helpers ──────────────────────────────────────────────────────────────
+const dbUpsertUser = async ({ provider, provider_id, display_name, avatar_url, email }) => {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('cl_users')
+    .upsert({ provider, provider_id, display_name, avatar_url, email },
+             { onConflict: 'provider,provider_id' })
+    .select().single();
+  if (error) throw error;
+  return data;
+};
+
+const dbGetUserById = async (id) => {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from('cl_users').select('*, cl_wallets(*)').eq('id', id).single();
+  return data;
+};
+
+const dbLinkWallet = async (userId, { chain, address }) => {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('cl_wallets')
+    .upsert({ user_id: userId, chain, address, verified_at: new Date().toISOString() },
+             { onConflict: 'user_id,address' })
+    .select().single();
+  if (error) throw error;
+  return data;
+};
 
 const app = express();
 const PORT = process.env.PORT || 10000; 
@@ -100,6 +197,266 @@ const fetchTokenImage = async (symbol) => {
     return img;
   } catch { _imageCache[key] = ''; return ''; }
 };
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUTH & PROFILE ROUTES
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Step 1: Generate a nonce for wallet signing (public, no auth) ─────────────
+app.post('/api/auth/nonce', (req, res) => {
+  const { address } = req.body;
+  if (!address) return res.status(400).json({ error: 'address required' });
+  const key = address.toLowerCase();
+  const nonce = crypto.randomBytes(32).toString('hex');
+  _authNonces[key] = { nonce, expires: Date.now() + 5 * 60 * 1000 };
+  res.json({ nonce });
+});
+
+// ── Step 2a: Login / link via wallet signature ────────────────────────────────
+// If Authorization header present → links wallet to existing account
+// If no header → creates/finds account keyed by wallet address
+app.post('/api/auth/wallet-login', async (req, res) => {
+  const { chain, address, signature, key: cborKey, nonce } = req.body;
+  if (!chain || !address || !signature || !nonce)
+    return res.status(400).json({ error: 'chain, address, signature, nonce required' });
+
+  // Validate nonce
+  const addrKey = address.toLowerCase();
+  const stored = _authNonces[addrKey];
+  if (!stored || stored.nonce !== nonce || stored.expires < Date.now())
+    return res.status(400).json({ error: 'Invalid or expired nonce' });
+  delete _authNonces[addrKey]; // consume
+
+  const message = `ChainLens login\nAddress: ${address}\nNonce: ${nonce}`;
+
+  // ── Verify signature ──────────────────────────────────────────────────────
+  if (chain === 'evm' && ethersVerify) {
+    try {
+      const recovered = ethersVerify(message, signature);
+      if (recovered.toLowerCase() !== address.toLowerCase())
+        return res.status(400).json({ error: 'EVM signature mismatch' });
+    } catch (e) { return res.status(400).json({ error: 'Invalid EVM signature' }); }
+  }
+
+  if (chain === 'solana' && nacl) {
+    try {
+      const msgBytes = Buffer.from(message);
+      const sigBytes = Buffer.from(signature, 'base64');
+      const pubBytes = base58Decode(address);
+      const valid = nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes);
+      if (!valid) return res.status(400).json({ error: 'Solana signature mismatch' });
+    } catch (e) { return res.status(400).json({ error: 'Invalid Solana signature' }); }
+  }
+
+  // Cardano CIP-30 — signature is CBOR; basic address ownership check for now
+  // Full CIP-8 verification: add @emurgo/cardano-serialization-lib-nodejs
+  if (chain === 'cardano') {
+    if (!signature || !cborKey)
+      return res.status(400).json({ error: 'Cardano requires signature + key' });
+    // TODO: decode CBOR and verify with CSL for production hardening
+    console.log(`ℹ️ Cardano wallet ${address.substring(0, 20)}... linked (signature accepted)`);
+  }
+
+  // ── Determine if this is a link (existing session) or new login ───────────
+  const authHeader = req.headers.authorization?.replace('Bearer ', '');
+  let userId = null;
+
+  if (authHeader) {
+    try {
+      const claims = jwt.verify(authHeader, JWT_SECRET);
+      userId = claims.sub;
+    } catch (e) { /* token invalid — treat as new login */ }
+  }
+
+  if (supabase) {
+    if (userId) {
+      // Link wallet to existing account
+      await dbLinkWallet(userId, { chain, address });
+      const profile = await dbGetUserById(userId);
+      return res.json({ success: true, profile });
+    } else {
+      // Create/find account by wallet address
+      const user = await dbUpsertUser({
+        provider: chain + '_wallet',
+        provider_id: address.toLowerCase(),
+        display_name: address.substring(0, 8) + '...' + address.slice(-4),
+        avatar_url: null, email: null
+      });
+      await dbLinkWallet(user.id, { chain, address });
+      const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
+      const profile = await dbGetUserById(user.id);
+      return res.json({ token, profile });
+    }
+  } else {
+    // Supabase not configured — return a mock token so frontend still works
+    const mockUserId = crypto.createHash('sha256').update(address.toLowerCase()).digest('hex').substring(0, 24);
+    const token = jwt.sign({ sub: mockUserId, address, chain }, JWT_SECRET, { expiresIn: '30d' });
+    return res.json({
+      token,
+      profile: {
+        id: mockUserId,
+        display_name: address.substring(0, 8) + '...' + address.slice(-4),
+        avatar_url: null,
+        provider: chain + '_wallet',
+        cl_wallets: [{ id: '1', chain, address, is_primary: true, label: null }]
+      }
+    });
+  }
+});
+
+// ── Google OAuth ──────────────────────────────────────────────────────────────
+app.get('/auth/google', (req, res) => {
+  if (!process.env.GOOGLE_CLIENT_ID) return res.redirect(`${FRONTEND_URL}/?auth_error=google_not_configured`);
+  const state = crypto.randomBytes(16).toString('hex');
+  _oauthStates[state] = { expires: Date.now() + 10 * 60 * 1000 };
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: process.env.GOOGLE_CALLBACK_URL || `${FRONTEND_URL}/auth/google/callback`,
+    response_type: 'code',
+    scope: 'openid email profile',
+    state
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+});
+
+app.get('/auth/google/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code) return res.redirect(`${FRONTEND_URL}/?auth_error=${error || 'cancelled'}`);
+  if (!_oauthStates[state]) return res.redirect(`${FRONTEND_URL}/?auth_error=invalid_state`);
+  delete _oauthStates[state];
+  try {
+    // Exchange code for tokens
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code, client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: process.env.GOOGLE_CALLBACK_URL || `${FRONTEND_URL}/auth/google/callback`,
+        grant_type: 'authorization_code'
+      })
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) throw new Error('No access token from Google');
+
+    // Get user info
+    const infoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+    const info = await infoRes.json();
+
+    const user = supabase
+      ? await dbUpsertUser({ provider: 'google', provider_id: info.id, display_name: info.name, avatar_url: info.picture, email: info.email })
+      : { id: crypto.createHash('sha256').update('google:' + info.id).digest('hex').substring(0, 24), display_name: info.name, avatar_url: info.picture };
+
+    const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
+    res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}`);
+  } catch (e) {
+    console.error('Google OAuth error:', e);
+    res.redirect(`${FRONTEND_URL}/?auth_error=google_failed`);
+  }
+});
+
+// ── Discord OAuth ─────────────────────────────────────────────────────────────
+app.get('/auth/discord', (req, res) => {
+  if (!process.env.DISCORD_CLIENT_ID) return res.redirect(`${FRONTEND_URL}/?auth_error=discord_not_configured`);
+  const state = crypto.randomBytes(16).toString('hex');
+  _oauthStates[state] = { expires: Date.now() + 10 * 60 * 1000 };
+  const params = new URLSearchParams({
+    client_id: process.env.DISCORD_CLIENT_ID,
+    redirect_uri: process.env.DISCORD_CALLBACK_URL || `${FRONTEND_URL}/auth/discord/callback`,
+    response_type: 'code',
+    scope: 'identify email',
+    state
+  });
+  res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
+});
+
+app.get('/auth/discord/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code) return res.redirect(`${FRONTEND_URL}/?auth_error=${error || 'cancelled'}`);
+  if (!_oauthStates[state]) return res.redirect(`${FRONTEND_URL}/?auth_error=invalid_state`);
+  delete _oauthStates[state];
+  try {
+    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code, client_id: process.env.DISCORD_CLIENT_ID,
+        client_secret: process.env.DISCORD_CLIENT_SECRET,
+        redirect_uri: process.env.DISCORD_CALLBACK_URL || `${FRONTEND_URL}/auth/discord/callback`,
+        grant_type: 'authorization_code'
+      })
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) throw new Error('No access token from Discord');
+
+    const infoRes = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+    const info = await infoRes.json();
+    const avatar = info.avatar
+      ? `https://cdn.discordapp.com/avatars/${info.id}/${info.avatar}.png`
+      : `https://cdn.discordapp.com/embed/avatars/${parseInt(info.discriminator || 0) % 5}.png`;
+
+    const user = supabase
+      ? await dbUpsertUser({ provider: 'discord', provider_id: info.id, display_name: info.global_name || info.username, avatar_url: avatar, email: info.email })
+      : { id: crypto.createHash('sha256').update('discord:' + info.id).digest('hex').substring(0, 24), display_name: info.global_name || info.username, avatar_url: avatar };
+
+    const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
+    res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}`);
+  } catch (e) {
+    console.error('Discord OAuth error:', e);
+    res.redirect(`${FRONTEND_URL}/?auth_error=discord_failed`);
+  }
+});
+
+// ── Profile routes (require auth) ─────────────────────────────────────────────
+app.get('/api/profile', requireAuth, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const profile = await dbGetUserById(req.user.sub);
+  if (!profile) return res.status(404).json({ error: 'User not found' });
+  res.json(profile);
+});
+
+app.patch('/api/profile', requireAuth, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const { display_name } = req.body;
+  const { data } = await supabase
+    .from('cl_users').update({ display_name }).eq('id', req.user.sub).select().single();
+  res.json(data);
+});
+
+app.post('/api/profile/wallet', requireAuth, async (req, res) => {
+  // Link additional wallet to an already-authenticated account
+  // Re-uses the wallet-login endpoint logic but always links (never creates new user)
+  req.headers.authorization = req.headers.authorization; // already set
+  // Delegate to wallet-login with the auth header present
+  // (wallet-login checks for Authorization and links if present)
+  return res.redirect(307, '/api/auth/wallet-login');
+});
+
+app.patch('/api/profile/wallet/:walletId', requireAuth, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  const { label, is_primary } = req.body;
+  const updates = {};
+  if (label !== undefined) updates.label = label;
+  if (is_primary !== undefined) updates.is_primary = is_primary;
+  const { data } = await supabase
+    .from('cl_wallets').update(updates)
+    .eq('id', req.params.walletId).eq('user_id', req.user.sub)
+    .select().single();
+  res.json(data);
+});
+
+app.delete('/api/profile/wallet/:walletId', requireAuth, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
+  await supabase.from('cl_wallets')
+    .delete().eq('id', req.params.walletId).eq('user_id', req.user.sub);
+  res.json({ success: true });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// END AUTH & PROFILE ROUTES
+// ══════════════════════════════════════════════════════════════════════════════
 
 // --- DOMAIN RESOLUTION ---
 

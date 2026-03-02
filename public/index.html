@@ -76,6 +76,27 @@
     .dark-scroll::-webkit-scrollbar-track { background: #0f172a; }
     .dark-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
     
+    /* Profile page styles */
+    .wallet-card {
+      transition: all 0.2s ease;
+    }
+    .wallet-card:hover {
+      transform: translateY(-1px);
+    }
+    .chain-pill-evm    { background: linear-gradient(135deg, #627EEA, #3c3c3d); }
+    .chain-pill-solana { background: linear-gradient(135deg, #9945FF, #14F195); }
+    .chain-pill-cardano{ background: linear-gradient(135deg, #0033AD, #00BAFF); }
+    .social-btn {
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .social-btn:hover { transform: translateY(-2px); }
+    .social-btn:active { transform: translateY(0); }
+    @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+    .slide-up { animation: slideUp 0.4s ease-out both; }
+    .slide-up-2 { animation: slideUp 0.4s ease-out 0.08s both; }
+    .slide-up-3 { animation: slideUp 0.4s ease-out 0.16s both; }
+    .slide-up-4 { animation: slideUp 0.4s ease-out 0.24s both; }
+    
     .scanning-glow {
         box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
     }
@@ -141,6 +162,16 @@
       const [convCoin, setConvCoin] = useState('');   // coin amount input
       const [convUsd, setConvUsd] = useState('');     // usd amount input
 
+      // ── Auth & Profile state ───────────────────────────────────────────────
+      const [authToken, setAuthToken] = useState(() => localStorage.getItem('cl_token'));
+      const [userProfile, setUserProfile] = useState(null);
+      const [authLoading, setAuthLoading] = useState(false);
+      const [walletConnecting, setWalletConnecting] = useState(null); // 'evm'|'solana'|'cardano'|'google'|'discord'
+      const [autoScan, setAutoScan] = useState(false);
+      const [editingWallet, setEditingWallet] = useState(null); // wallet id being renamed
+      const [walletLabelInput, setWalletLabelInput] = useState('');
+      const [profileError, setProfileError] = useState(null);
+
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
         polygon: { color: 'bg-[#7B3FE4]', label: 'Polygon', native: 'POL' },
@@ -196,6 +227,199 @@
         localStorage.setItem('hiddenAssets', JSON.stringify(hiddenIds));
         localStorage.setItem('spamAssets', JSON.stringify(spamIds));
       }, [hiddenIds, spamIds]);
+
+      // ── Handle OAuth redirect token in URL ────────────────────────────────
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('auth_token');
+        const error = params.get('auth_error');
+        if (token) {
+          setAuthToken(token);
+          localStorage.setItem('cl_token', token);
+          setActiveTab('profile');
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+        if (error) {
+          const friendlyErrors = {
+            google_not_configured: 'Google login is not set up yet. Use a wallet to sign in.',
+            discord_not_configured: 'Discord login is not set up yet. Use a wallet to sign in.',
+            google_failed: 'Google login failed. Please try again.',
+            discord_failed: 'Discord login failed. Please try again.',
+            cancelled: 'Login was cancelled.',
+            invalid_state: 'Login session expired. Please try again.',
+          };
+          setProfileError(friendlyErrors[error] || 'Login failed: ' + error.replace(/_/g,' '));
+          setActiveTab('profile');
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      }, []);
+
+      // ── Fetch profile whenever token changes ──────────────────────────────
+      useEffect(() => {
+        if (!authToken) { setUserProfile(null); return; }
+        setAuthLoading(true);
+        fetch('/api/profile', { headers: { Authorization: `Bearer ${authToken}` } })
+          .then(r => {
+            if (r.status === 401) { setAuthToken(null); localStorage.removeItem('cl_token'); return null; }
+            return r.json();
+          })
+          .then(data => { if (data) setUserProfile(data); })
+          .catch(() => {})
+          .finally(() => setAuthLoading(false));
+      }, [authToken]);
+
+      // ── Auto-scan when portfolio is loaded from profile ───────────────────
+      useEffect(() => {
+        if (autoScan && (evmAddr || solAddr || adaAddr)) {
+          setAutoScan(false);
+          handleScanAll();
+        }
+      }, [autoScan, evmAddr, solAddr, adaAddr]);
+
+      // ── Auth helper: authenticated fetch ──────────────────────────────────
+      const authFetch = (url, opts = {}) => fetch(url, {
+        ...opts,
+        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${authToken}`, ...opts.headers }
+      });
+
+      const logout = () => {
+        setAuthToken(null); setUserProfile(null);
+        localStorage.removeItem('cl_token');
+      };
+
+      // ── Social logins (redirect to backend OAuth) ─────────────────────────
+      const loginWithGoogle  = () => { setWalletConnecting('google');  window.location.href = '/auth/google';  };
+      const loginWithDiscord = () => { setWalletConnecting('discord'); window.location.href = '/auth/discord'; };
+
+      // ── Generic wallet connect helper ─────────────────────────────────────
+      const connectWallet = async (chain, getAddrAndSig) => {
+        setProfileError(null);
+        setWalletConnecting(chain);
+        try {
+          const { address, signature, key } = await getAddrAndSig();
+
+          // Get nonce
+          const { nonce } = await fetch('/api/auth/nonce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address })
+          }).then(r => r.json());
+
+          // Sign nonce — also capture key here (Cardano CIP-30 returns it with the signature)
+          const { signedSig, key: sigKey } = await getAddrAndSig(nonce);
+
+          // Submit to backend
+          const res = await fetch('/api/auth/wallet-login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+            },
+            body: JSON.stringify({ chain, address, signature: signedSig, key: sigKey, nonce })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Connection failed');
+
+          if (!authToken && data.token) {
+            setAuthToken(data.token);
+            localStorage.setItem('cl_token', data.token);
+          }
+          if (data.profile) setUserProfile(data.profile);
+          else if (authToken) {
+            // Re-fetch profile after linking
+            const p = await authFetch('/api/profile').then(r => r.json());
+            setUserProfile(p);
+          }
+        } catch (e) {
+          console.error(chain + ' connect error:', e);
+          setProfileError(e.message || 'Connection failed');
+        }
+        setWalletConnecting(null);
+      };
+
+      // ── EVM (MetaMask / any injected) ─────────────────────────────────────
+      const connectEVM = () => connectWallet('evm', async (nonce) => {
+        if (!window.ethereum) throw new Error('MetaMask not found. Please install it.');
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        const address = accounts[0];
+        if (!nonce) return { address };
+        const message = `ChainLens login\nAddress: ${address}\nNonce: ${nonce}`;
+        const signedSig = await window.ethereum.request({ method: 'personal_sign', params: [message, address] });
+        return { address, signedSig };
+      });
+
+      // ── Solana (Phantom / Backpack) ───────────────────────────────────────
+      const connectSolana = () => connectWallet('solana', async (nonce) => {
+        const wallet = window.solana || window.backpack;
+        if (!wallet) throw new Error('Phantom not found. Please install it.');
+        await wallet.connect();
+        const address = wallet.publicKey.toString();
+        if (!nonce) return { address };
+        const message = `ChainLens login\nAddress: ${address}\nNonce: ${nonce}`;
+        const encoded = new TextEncoder().encode(message);
+        const { signature } = await wallet.signMessage(encoded, 'utf8');
+        const signedSig = btoa(String.fromCharCode(...new Uint8Array(signature)));
+        return { address, signedSig };
+      });
+
+      // ── Cardano (Eternl / Nami / Vespr / Lace) ────────────────────────────
+      const connectCardano = () => connectWallet('cardano', async (nonce) => {
+        const wName = ['eternl','nami','vespr','lace','flint'].find(w => window.cardano?.[w]);
+        if (!wName) throw new Error('No Cardano wallet found. Install Eternl or Nami.');
+        const api = await window.cardano[wName].enable();
+        const addrs = await api.getUsedAddresses();
+        const address = addrs[0] || (await api.getChangeAddress());
+        if (!nonce) return { address };
+        const message = `ChainLens login\nAddress: ${address}\nNonce: ${nonce}`;
+        const hexMsg = Array.from(new TextEncoder().encode(message))
+          .map(b => b.toString(16).padStart(2,'0')).join('');
+        const { signature: signedSig, key } = await api.signData(address, hexMsg);
+        return { address, signedSig, key };
+      });
+
+      // ── Load portfolio from linked wallets ────────────────────────────────
+      const loadMyPortfolio = () => {
+        if (!userProfile?.cl_wallets) return;
+        const wallets = userProfile.cl_wallets;
+        const pick = (chain) => wallets.find(w => w.chain === chain && w.is_primary) || wallets.find(w => w.chain === chain);
+        const evm = pick('evm'); const sol = pick('solana'); const ada = pick('cardano');
+        if (evm) setEvmAddr(evm.address);
+        if (sol) setSolAddr(sol.address);
+        if (ada) setAdaAddr(ada.address);
+        setAutoScan(true);
+        setActiveTab('portfolio');
+      };
+
+      // ── Rename wallet ──────────────────────────────────────────────────────
+      const saveWalletLabel = async (walletId) => {
+        try {
+          await authFetch(`/api/profile/wallet/${walletId}`, {
+            method: 'PATCH', body: JSON.stringify({ label: walletLabelInput })
+          });
+          const p = await authFetch('/api/profile').then(r => r.json());
+          setUserProfile(p);
+        } catch (e) { setProfileError('Failed to save label'); }
+        setEditingWallet(null);
+      };
+
+      // ── Delete wallet ──────────────────────────────────────────────────────
+      const unlinkWallet = async (walletId) => {
+        if (!confirm('Remove this wallet from your profile?')) return;
+        await authFetch(`/api/profile/wallet/${walletId}`, { method: 'DELETE' });
+        const p = await authFetch('/api/profile').then(r => r.json());
+        setUserProfile(p);
+      };
+
+      // ── Set primary wallet ─────────────────────────────────────────────────
+      const setPrimary = async (walletId) => {
+        await authFetch(`/api/profile/wallet/${walletId}`, {
+          method: 'PATCH', body: JSON.stringify({ is_primary: true })
+        });
+        const p = await authFetch('/api/profile').then(r => r.json());
+        setUserProfile(p);
+      };
+
+      const truncAddr = (addr) => addr ? addr.substring(0,8) + '…' + addr.slice(-6) : '';
 
       useEffect(() => {
         const fetchMarket = async () => {
@@ -828,6 +1052,10 @@
                     <button onClick={() => setActiveTab('portfolio')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'portfolio' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Wallet Scanner</button>
                     <button onClick={() => setActiveTab('swap')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'swap' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Swap Hub</button>
                     <button onClick={() => setActiveTab('market')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'market' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Market Watch</button>
+                    <button onClick={() => setActiveTab('profile')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all relative ${activeTab === 'profile' ? (darkMode ? 'bg-amber-400 text-slate-950 shadow-lg' : 'bg-amber-400 text-slate-950 shadow-xl') : 'text-slate-400 hover:text-amber-400'}`}>
+                      Profile
+                      {userProfile && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-slate-900"></span>}
+                    </button>
                 </div>
 
                 <div className="flex items-center space-x-3 bg-black/5 px-4 py-3 rounded-2xl border border-white/5">
@@ -1283,6 +1511,244 @@
                             </div>
                         )}
                     </div>
+                </div>
+            ) : activeTab === 'profile' ? (
+                // ══════════════════════════════════════════════════════════
+                // PROFILE TAB
+                // ══════════════════════════════════════════════════════════
+                <div className="max-w-3xl mx-auto">
+                  {authLoading ? (
+                    <div className="py-32 text-center animate-pulse">
+                      <p className={`text-sm font-bold uppercase tracking-widest ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>Loading profile…</p>
+                    </div>
+                  ) : !userProfile ? (
+                    // ── LOGGED OUT: Login / Connect panel ──────────────────
+                    <div className={`rounded-[3rem] border p-8 md:p-14 shadow-2xl glass-card ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-100'}`}>
+                      <div className="text-center mb-10 slide-up">
+                        <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-amber-400/10 border-2 border-amber-400/30 mb-6">
+                          <span className="text-4xl">⛓️</span>
+                        </div>
+                        <h2 className="text-4xl font-heading font-extrabold uppercase mb-3">Your ChainLens Profile</h2>
+                        <p className={`text-sm max-w-sm mx-auto ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          Sign in once. Link all your wallets. Scan your entire portfolio in a single click.
+                        </p>
+                        {profileError && (
+                          <div className="mt-4 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold">
+                            {profileError}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Social login */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8 slide-up-2">
+                        <button onClick={loginWithGoogle} disabled={!!walletConnecting}
+                          className="social-btn flex items-center justify-center gap-3 py-4 px-6 rounded-2xl bg-white border-2 border-slate-200 text-slate-800 font-bold text-sm shadow-sm hover:shadow-md hover:border-slate-300 disabled:opacity-50">
+                          <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20H24v8h11.3C33.7 33.6 29.3 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l5.7-5.7C34.2 5.1 29.4 3 24 3 12.9 3 4 11.9 4 23s8.9 20 20 20c11 0 19.4-7.7 19.4-20 0-1.3-.1-2.7-.4-3z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.1 18.9 12 24 12c3.1 0 5.9 1.1 8.1 2.9l5.7-5.7C34.2 5.1 29.4 3 24 3c-7.6 0-14.2 4.3-17.7 10.7z"/><path fill="#4CAF50" d="M24 43c5.2 0 10-1.9 13.6-5.1l-6.3-5.3C29.5 34.5 26.9 35.5 24 35.5c-5.2 0-9.6-3.4-11.2-8.1l-6.5 5C9.8 39 16.5 43 24 43z"/><path fill="#1976D2" d="M43.6 20H24v8h11.3c-.8 2.3-2.3 4.2-4.3 5.5l6.3 5.3C41.7 35.4 44 29.7 44 23c0-1-.1-2-.4-3z"/></svg>
+                          {walletConnecting === 'google' ? 'Redirecting…' : 'Continue with Google'}
+                        </button>
+                        <button onClick={loginWithDiscord} disabled={!!walletConnecting}
+                          className="social-btn flex items-center justify-center gap-3 py-4 px-6 rounded-2xl bg-[#5865F2] text-white font-bold text-sm shadow-sm hover:bg-[#4752C4] hover:shadow-md disabled:opacity-50">
+                          <svg width="20" height="16" viewBox="0 0 71 55" fill="white"><path d="M60.1 4.9A58.6 58.6 0 0 0 45.4.9a.2.2 0 0 0-.2.1 40.8 40.8 0 0 0-1.8 3.7 54.1 54.1 0 0 0-16.2 0 37.5 37.5 0 0 0-1.8-3.7.2.2 0 0 0-.2-.1A58.4 58.4 0 0 0 10.5 4.9a.2.2 0 0 0-.1.1C1.6 17.8-.9 30.4.3 42.8a.2.2 0 0 0 .1.2 58.9 58.9 0 0 0 17.7 9 .2.2 0 0 0 .2-.1 42 42 0 0 0 3.6-5.9.2.2 0 0 0-.1-.3 38.8 38.8 0 0 1-5.5-2.6.2.2 0 0 1 0-.4c.4-.3.7-.5 1.1-.8a.2.2 0 0 1 .2 0c11.5 5.3 24 5.3 35.4 0a.2.2 0 0 1 .2 0l1.1.8a.2.2 0 0 1 0 .4 36 36 0 0 1-5.5 2.6.2.2 0 0 0-.1.3c1.1 2 2.3 3.9 3.6 5.9a.2.2 0 0 0 .2.1 58.7 58.7 0 0 0 17.8-9 .2.2 0 0 0 .1-.2c1.5-14.9-2.6-27.4-10.9-38.7a.2.2 0 0 0-.1-.1ZM23.7 35.2c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2Zm23.6 0c-3.5 0-6.4-3.2-6.4-7.2s2.8-7.2 6.4-7.2c3.6 0 6.5 3.3 6.4 7.2 0 4-2.8 7.2-6.4 7.2Z"/></svg>
+                          {walletConnecting === 'discord' ? 'Redirecting…' : 'Continue with Discord'}
+                        </button>
+                      </div>
+
+                      {/* Divider */}
+                      <div className="flex items-center gap-4 mb-8 slide-up-3">
+                        <div className={`flex-1 h-px ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}></div>
+                        <span className={`text-[10px] font-bold uppercase tracking-widest ${darkMode ? 'text-slate-600' : 'text-slate-400'}`}>or connect a wallet</span>
+                        <div className={`flex-1 h-px ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}></div>
+                      </div>
+
+                      {/* Wallet connect buttons */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 slide-up-4">
+                        <button onClick={connectEVM} disabled={!!walletConnecting}
+                          className="social-btn flex flex-col items-center gap-2 py-5 px-4 rounded-2xl border-2 font-bold text-sm disabled:opacity-50 border-orange-500/30 hover:border-orange-500 hover:bg-orange-500/5">
+                          <span className="text-3xl">🦊</span>
+                          <span className="text-xs font-bold uppercase tracking-widest text-orange-500">
+                            {walletConnecting === 'evm' ? 'Connecting…' : 'MetaMask / EVM'}
+                          </span>
+                          <span className={`text-[9px] opacity-50 text-center ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Ethereum, Base, Polygon +12 more</span>
+                        </button>
+                        <button onClick={connectSolana} disabled={!!walletConnecting}
+                          className="social-btn flex flex-col items-center gap-2 py-5 px-4 rounded-2xl border-2 font-bold text-sm disabled:opacity-50 border-purple-500/30 hover:border-purple-500 hover:bg-purple-500/5">
+                          <span className="text-3xl">👻</span>
+                          <span className="text-xs font-bold uppercase tracking-widest text-purple-400">
+                            {walletConnecting === 'solana' ? 'Connecting…' : 'Phantom / Solana'}
+                          </span>
+                          <span className={`text-[9px] opacity-50 text-center ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Solana network</span>
+                        </button>
+                        <button onClick={connectCardano} disabled={!!walletConnecting}
+                          className="social-btn flex flex-col items-center gap-2 py-5 px-4 rounded-2xl border-2 font-bold text-sm disabled:opacity-50 border-blue-500/30 hover:border-blue-500 hover:bg-blue-500/5">
+                          <span className="text-3xl">₳</span>
+                          <span className="text-xs font-bold uppercase tracking-widest text-blue-400">
+                            {walletConnecting === 'cardano' ? 'Connecting…' : 'Eternl / Cardano'}
+                          </span>
+                          <span className={`text-[9px] opacity-50 text-center ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Cardano network</span>
+                        </button>
+                      </div>
+
+                      <p className={`text-center text-[10px] mt-8 ${darkMode ? 'text-slate-600' : 'text-slate-400'}`}>
+                        Signing is gasless and free — no transaction is sent.
+                      </p>
+                    </div>
+                  ) : (
+                    // ── LOGGED IN: Profile dashboard ───────────────────────
+                    <div className="space-y-6">
+                      {/* Header card */}
+                      <div className={`rounded-[3rem] border p-8 glass-card ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-100 shadow-xl'}`}>
+                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                          <div className="flex items-center gap-5">
+                            {/* Avatar */}
+                            <div className="relative">
+                              {userProfile.avatar_url
+                                ? <img src={userProfile.avatar_url} className="w-16 h-16 rounded-2xl object-cover" />
+                                : <div className="w-16 h-16 rounded-2xl bg-amber-400 flex items-center justify-center text-2xl font-heading font-black text-slate-900">
+                                    {(userProfile.display_name || '?').charAt(0).toUpperCase()}
+                                  </div>
+                              }
+                              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-400 rounded-full border-2 border-slate-900 flex items-center justify-center">
+                                <span className="text-[8px]">✓</span>
+                              </div>
+                            </div>
+                            <div>
+                              <h2 className="text-2xl font-heading font-extrabold">{userProfile.display_name}</h2>
+                              <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                {userProfile.provider?.replace('_wallet','').replace('_',' ')} · {(userProfile.cl_wallets || []).length} wallet{(userProfile.cl_wallets || []).length !== 1 ? 's' : ''} linked
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {/* Load portfolio CTA */}
+                            <button onClick={loadMyPortfolio}
+                              disabled={!(userProfile.cl_wallets?.length)}
+                              className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-sm uppercase tracking-widest transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed">
+                              <span>⚡</span> Scan My Wallets
+                            </button>
+                            <button onClick={logout}
+                              className={`px-4 py-3 rounded-2xl text-[10px] font-bold uppercase tracking-widest border transition-all ${darkMode ? 'border-slate-800 text-slate-500 hover:border-red-900 hover:text-red-400' : 'border-slate-200 text-slate-400 hover:border-red-200 hover:text-red-500'}`}>
+                              Sign Out
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Add more wallets — always visible even when wallets exist */}
+                      {profileError && (
+                        <div className="px-4 py-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold text-center">
+                          {profileError}
+                        </div>
+                      )}
+
+                      {/* Linked wallets section */}
+                      <div className={`rounded-[3rem] border p-8 glass-card ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-100 shadow-xl'}`}>
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="text-lg font-heading font-extrabold uppercase">Linked Wallets</h3>
+                          <span className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                            {(userProfile.cl_wallets || []).length} total
+                          </span>
+                        </div>
+
+                        {(!userProfile.cl_wallets || userProfile.cl_wallets.length === 0) ? (
+                          <p className={`text-center py-8 text-sm italic ${darkMode ? 'text-slate-600' : 'text-slate-400'}`}>
+                            No wallets linked yet. Connect one below.
+                          </p>
+                        ) : (
+                          <div className="space-y-3 mb-6">
+                            {['evm','solana','cardano'].map(chain => {
+                              const chainWallets = (userProfile.cl_wallets || []).filter(w => w.chain === chain);
+                              if (chainWallets.length === 0) return null;
+                              const pillClass = chain === 'evm' ? 'chain-pill-evm' : chain === 'solana' ? 'chain-pill-solana' : 'chain-pill-cardano';
+                              const chainLabel = chain === 'evm' ? '⬡ EVM Chains' : chain === 'solana' ? '◎ Solana' : '₳ Cardano';
+                              return (
+                                <div key={chain} className="space-y-2">
+                                  <p className={`text-[10px] font-bold uppercase tracking-widest px-1 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>{chainLabel}</p>
+                                  {chainWallets.map(wallet => (
+                                    <div key={wallet.id} className={`wallet-card group p-4 rounded-2xl border flex items-center gap-4 ${darkMode ? 'bg-slate-800/50 border-slate-700 hover:border-slate-600' : 'bg-slate-50 border-slate-200 hover:border-slate-300'}`}>
+                                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-black ${pillClass}`}>
+                                        {chain === 'evm' ? '⬡' : chain === 'solana' ? '◎' : '₳'}
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        {editingWallet === wallet.id ? (
+                                          <div className="flex items-center gap-2">
+                                            <input
+                                              type="text" value={walletLabelInput}
+                                              onChange={e => setWalletLabelInput(e.target.value)}
+                                              onKeyDown={e => { if (e.key === 'Enter') saveWalletLabel(wallet.id); if (e.key === 'Escape') setEditingWallet(null); }}
+                                              placeholder="Wallet nickname…"
+                                              autoFocus
+                                              className={`flex-1 text-xs px-3 py-1.5 rounded-lg border outline-none ${darkMode ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                                            />
+                                            <button onClick={() => saveWalletLabel(wallet.id)} className="text-[10px] text-emerald-400 font-bold">Save</button>
+                                            <button onClick={() => setEditingWallet(null)} className="text-[10px] text-slate-500 font-bold">Cancel</button>
+                                          </div>
+                                        ) : (
+                                          <>
+                                            <div className="flex items-center gap-2">
+                                              <p className={`text-sm font-bold font-mono ${darkMode ? 'text-white' : 'text-slate-800'}`}>{truncAddr(wallet.address)}</p>
+                                              {wallet.is_primary && <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-400">Primary</span>}
+                                            </div>
+                                            {wallet.label && <p className={`text-[10px] ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{wallet.label}</p>}
+                                          </>
+                                        )}
+                                      </div>
+                                      {editingWallet !== wallet.id && (
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          {!wallet.is_primary && (
+                                            <button onClick={() => setPrimary(wallet.id)} title="Set as primary"
+                                              className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] transition-all ${darkMode ? 'hover:bg-amber-400/20 text-slate-500 hover:text-amber-400' : 'hover:bg-amber-100 text-slate-400 hover:text-amber-600'}`}>★</button>
+                                          )}
+                                          <button onClick={() => { setEditingWallet(wallet.id); setWalletLabelInput(wallet.label || ''); }} title="Rename"
+                                            className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] transition-all ${darkMode ? 'hover:bg-slate-700 text-slate-500 hover:text-white' : 'hover:bg-slate-200 text-slate-400'}`}>✏️</button>
+                                          <button onClick={() => unlinkWallet(wallet.id)} title="Remove"
+                                            className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] transition-all ${darkMode ? 'hover:bg-red-900/30 text-slate-600 hover:text-red-400' : 'hover:bg-red-100 text-slate-400 hover:text-red-500'}`}>✕</button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Connect additional wallets */}
+                        <div className={`pt-6 border-t ${darkMode ? 'border-slate-800' : 'border-slate-100'}`}>
+                          <p className={`text-[10px] font-bold uppercase tracking-widest mb-4 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>Connect Another Wallet</p>
+                          <div className="flex flex-wrap gap-3">
+                            <button onClick={connectEVM} disabled={!!walletConnecting}
+                              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${darkMode ? 'border-orange-500/30 text-orange-400 hover:bg-orange-500/10' : 'border-orange-300 text-orange-500 hover:bg-orange-50'}`}>
+                              🦊 {walletConnecting === 'evm' ? 'Connecting…' : 'Add EVM Wallet'}
+                            </button>
+                            <button onClick={connectSolana} disabled={!!walletConnecting}
+                              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${darkMode ? 'border-purple-500/30 text-purple-400 hover:bg-purple-500/10' : 'border-purple-300 text-purple-500 hover:bg-purple-50'}`}>
+                              👻 {walletConnecting === 'solana' ? 'Connecting…' : 'Add Solana Wallet'}
+                            </button>
+                            <button onClick={connectCardano} disabled={!!walletConnecting}
+                              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 ${darkMode ? 'border-blue-500/30 text-blue-400 hover:bg-blue-500/10' : 'border-blue-300 text-blue-500 hover:bg-blue-50'}`}>
+                              ₳ {walletConnecting === 'cardano' ? 'Connecting…' : 'Add Cardano Wallet'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Quick-scan banner — shows on portfolio tab too */}
+                      {(userProfile.cl_wallets || []).length > 0 && (
+                        <div className={`rounded-3xl border p-6 flex items-center justify-between gap-4 ${darkMode ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <div>
+                            <p className="text-sm font-bold text-emerald-500">Ready to scan</p>
+                            <p className={`text-xs mt-0.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                              {(userProfile.cl_wallets || []).length} wallet{(userProfile.cl_wallets || []).length !== 1 ? 's' : ''} across {[...new Set((userProfile.cl_wallets || []).map(w => w.chain))].length} chain{[...new Set((userProfile.cl_wallets || []).map(w => w.chain))].length !== 1 ? ' families' : ' family'}
+                            </p>
+                          </div>
+                          <button onClick={loadMyPortfolio}
+                            className="px-8 py-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-white font-heading font-extrabold uppercase tracking-widest text-lg transition-all shadow-xl shadow-emerald-500/20">
+                            ⚡ Load Portfolio
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
             ) : null}
 
