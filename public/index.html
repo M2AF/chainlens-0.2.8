@@ -1709,11 +1709,11 @@
                                 </div>
                               ) : (
                                 <div className="flex items-center gap-2 group cursor-pointer" onClick={() => { setNameInput(userProfile.display_name || ''); setEditingName(true); }}>
-                                  <h2 className="text-2xl font-heading font-extrabold">{userProfile.display_name}</h2>
+                                  <h2 className="text-1xl font-heading font-extrabold">{userProfile.display_name}</h2>
                                   <span className={`text-[10px] opacity-0 group-hover:opacity-60 transition-opacity font-bold uppercase tracking-widest ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>✏ Edit</span>
                                 </div>
                               )}
-                              <p className={`text-[8px] font-bold uppercase tracking-widest mt-1 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                              <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                 {userProfile.provider?.replace('_wallet','').replace('_',' ')} · {(userProfile.cl_wallets || []).length} wallet{(userProfile.cl_wallets || []).length !== 1 ? 's' : ''} linked
                               </p>
                             </div>
