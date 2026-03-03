@@ -1709,7 +1709,7 @@
                                 </div>
                               ) : (
                                 <div className="flex items-center gap-2 group cursor-pointer" onClick={() => { setNameInput(userProfile.display_name || ''); setEditingName(true); }}>
-                                  <h2 className="text-2xl font-heading font-extrabold">{userProfile.display_name}</h2>
+                                  <h2 className="text-1xl font-heading font-extrabold">{userProfile.display_name}</h2>
                                   <span className={`text-[10px] opacity-0 group-hover:opacity-60 transition-opacity font-bold uppercase tracking-widest ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>✏ Edit</span>
                                 </div>
                               )}
