@@ -171,6 +171,8 @@
       const [editingWallet, setEditingWallet] = useState(null); // wallet id being renamed
       const [walletLabelInput, setWalletLabelInput] = useState('');
       const [profileError, setProfileError] = useState(null);
+      const [editingName, setEditingName] = useState(false);
+      const [nameInput, setNameInput] = useState('');
 
       const chainStyles = {
         ethereum: { color: 'bg-[#3c3c3d]', label: 'Ethereum', native: 'ETH' },
@@ -464,6 +466,20 @@
           setUserProfile(p);
         } catch (e) { setProfileError('Failed to save label'); }
         setEditingWallet(null);
+      };
+
+      // ── Rename display name ────────────────────────────────────────────────
+      const saveName = async () => {
+        const trimmed = nameInput.trim();
+        if (!trimmed) { setEditingName(false); return; }
+        try {
+          await authFetch('/api/profile', {
+            method: 'PATCH', body: JSON.stringify({ display_name: trimmed })
+          });
+          const p = await authFetch('/api/profile').then(r => r.json());
+          setUserProfile(p);
+        } catch (e) { setProfileError('Failed to save name'); }
+        setEditingName(false);
       };
 
       // ── Delete wallet ──────────────────────────────────────────────────────
@@ -1111,15 +1127,7 @@
               </div>
             </div>
 
-            {/* Dark mode toggle — fixed top-right */}
-            <div className={`fixed top-4 right-4 z-50 flex items-center space-x-3 px-4 py-2.5 rounded-2xl border backdrop-blur-md transition-all ${darkMode ? 'bg-slate-900/80 border-slate-700' : 'bg-white/80 border-slate-200 shadow-md'}`}>
-                <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-                <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full cursor-pointer ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                    <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
-                </div>
-            </div>
-
-            <div className="flex justify-center mb-10">
+            <div className="flex flex-col md:flex-row items-center justify-center gap-6 mb-10">
                 <div className={`flex p-1 rounded-2xl border transition-all ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100 shadow-md'}`}>
                     <button onClick={() => setActiveTab('portfolio')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'portfolio' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Wallet Scanner</button>
                     <button onClick={() => setActiveTab('swap')} className={`px-8 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeTab === 'swap' ? (darkMode ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-950 text-white shadow-xl') : 'text-slate-400 hover:text-slate-500'}`}>Swap Hub</button>
@@ -1128,6 +1136,13 @@
                       Profile
                       {userProfile && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-slate-900"></span>}
                     </button>
+                </div>
+
+                <div className="flex items-center space-x-3 bg-black/5 px-4 py-3 rounded-2xl border border-white/5">
+                    <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
+                    <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                        <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </div>
                 </div>
             </div>
 
@@ -1664,27 +1679,47 @@
                       <div className={`rounded-[3rem] border p-8 glass-card ${darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-100 shadow-xl'}`}>
                         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
                           <div className="flex items-center gap-5">
-                            {/* Avatar */}
-                            <div className="relative">
+                            {/* Avatar — circular like Twitter */}
+                            <div className="relative flex-shrink-0">
                               {userProfile.avatar_url
-                                ? <img src={userProfile.avatar_url} className="w-16 h-16 rounded-2xl object-cover" />
-                                : <div className="w-16 h-16 rounded-2xl bg-amber-400 flex items-center justify-center text-2xl font-heading font-black text-slate-900">
+                                ? <img src={userProfile.avatar_url} className="w-20 h-20 rounded-full object-cover ring-4 ring-amber-400/40" referrerPolicy="no-referrer" />
+                                : <div className="w-20 h-20 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-3xl font-heading font-black text-slate-900 ring-4 ring-amber-400/40">
                                     {(userProfile.display_name || '?').charAt(0).toUpperCase()}
                                   </div>
                               }
-                              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-400 rounded-full border-2 border-slate-900 flex items-center justify-center">
-                                <span className="text-[8px]">✓</span>
+                              <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-emerald-400 rounded-full border-2 border-slate-900 flex items-center justify-center">
+                                <span className="text-[9px] font-black">✓</span>
                               </div>
                             </div>
+
+                            {/* Name — click to edit */}
                             <div>
-                              <h2 className="text-2xl font-heading font-extrabold">{userProfile.display_name}</h2>
+                              {editingName ? (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    autoFocus
+                                    value={nameInput}
+                                    onChange={e => setNameInput(e.target.value)}
+                                    onKeyDown={e => { if(e.key==='Enter') saveName(); if(e.key==='Escape') setEditingName(false); }}
+                                    maxLength={32}
+                                    className={`text-xl font-heading font-extrabold bg-transparent border-b-2 border-amber-400 outline-none w-48 pb-0.5 ${darkMode ? 'text-white' : 'text-slate-900'}`}
+                                  />
+                                  <button onClick={saveName} className="text-emerald-400 text-xs font-black uppercase tracking-widest hover:text-emerald-300">Save</button>
+                                  <button onClick={() => setEditingName(false)} className={`text-xs font-bold uppercase tracking-widest ${darkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'}`}>✕</button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 group cursor-pointer" onClick={() => { setNameInput(userProfile.display_name || ''); setEditingName(true); }}>
+                                  <h2 className="text-2xl font-heading font-extrabold">{userProfile.display_name}</h2>
+                                  <span className={`text-[10px] opacity-0 group-hover:opacity-60 transition-opacity font-bold uppercase tracking-widest ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>✏ Edit</span>
+                                </div>
+                              )}
                               <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                 {userProfile.provider?.replace('_wallet','').replace('_',' ')} · {(userProfile.cl_wallets || []).length} wallet{(userProfile.cl_wallets || []).length !== 1 ? 's' : ''} linked
                               </p>
                             </div>
                           </div>
+
                           <div className="flex items-center gap-3">
-                            {/* Load portfolio CTA */}
                             <button onClick={loadMyPortfolio}
                               disabled={!(userProfile.cl_wallets?.length)}
                               className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-sm uppercase tracking-widest transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed">
