@@ -88,37 +88,8 @@ const dbUpsertUser = async ({ provider, provider_id, display_name, avatar_url, e
 const dbGetUserById = async (id) => {
   if (!supabase) return null;
   const { data } = await supabase
-    .from('cl_users')
-    .select('*, cl_wallets(*), cl_linked_accounts(*)')
-    .eq('id', id).single();
+    .from('cl_users').select('*, cl_wallets(*)').eq('id', id).single();
   return data;
-};
-
-// Upsert a social login record linked to a user_id
-const dbLinkSocialAccount = async (userId, { provider, provider_id, display_name, avatar_url, email }) => {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from('cl_linked_accounts')
-    .upsert(
-      { user_id: userId, provider, provider_id, display_name, avatar_url, email },
-      { onConflict: 'provider,provider_id' }
-    )
-    .select().single();
-  if (error) throw error;
-  return data;
-};
-
-// Find an existing user who already has this social account linked
-const dbFindUserBySocial = async (provider, provider_id) => {
-  if (!supabase) return null;
-  const { data } = await supabase
-    .from('cl_linked_accounts')
-    .select('user_id')
-    .eq('provider', provider)
-    .eq('provider_id', provider_id)
-    .single();
-  if (!data) return null;
-  return dbGetUserById(data.user_id);
 };
 
 const dbLinkWallet = async (userId, { chain, address }) => {
@@ -337,11 +308,7 @@ app.post('/api/auth/wallet-login', async (req, res) => {
 app.get('/auth/google', (req, res) => {
   if (!process.env.GOOGLE_CLIENT_ID) return res.redirect(`${FRONTEND_URL}/?auth_error=google_not_configured`);
   const state = crypto.randomBytes(16).toString('hex');
-  // Store linkToken so callback knows whether this is a new login or linking to existing account
-  _oauthStates[state] = {
-    expires: Date.now() + 10 * 60 * 1000,
-    linkToken: req.query.link_token || null
-  };
+  _oauthStates[state] = { expires: Date.now() + 10 * 60 * 1000 };
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID,
     redirect_uri: process.env.GOOGLE_CALLBACK_URL || `${FRONTEND_URL}/auth/google/callback`,
@@ -356,10 +323,7 @@ app.get('/auth/google/callback', async (req, res) => {
   const { code, state, error } = req.query;
   if (error || !code) return res.redirect(`${FRONTEND_URL}/?auth_error=${error || 'cancelled'}`);
   if (!_oauthStates[state]) return res.redirect(`${FRONTEND_URL}/?auth_error=invalid_state`);
-  // IMPORTANT: save state data BEFORE deleting it
-  const stateData = _oauthStates[state];
   delete _oauthStates[state];
-  const linkToken = stateData.linkToken || null;
   try {
     // Exchange code for tokens
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -380,55 +344,9 @@ app.get('/auth/google/callback', async (req, res) => {
     });
     const info = await infoRes.json();
 
-    let user;
-    if (supabase) {
-      if (linkToken) {
-        // LINK MODE: attach Google to an already-logged-in account
-        try {
-          const claims = jwt.verify(linkToken, JWT_SECRET);
-          user = await dbGetUserById(claims.sub);
-          if (!user) throw new Error('User not found');
-          await dbLinkSocialAccount(user.id, {
-            provider: 'google', provider_id: info.id,
-            display_name: info.name, avatar_url: info.picture, email: info.email
-          });
-          // Update primary display info if not already set
-          if (!user.avatar_url || !user.email) {
-            await supabase.from('cl_users').update({
-              avatar_url: user.avatar_url || info.picture,
-              email: user.email || info.email
-            }).eq('id', user.id);
-          }
-          const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
-          return res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}&linked=google`);
-        } catch (e) {
-          console.error('Google link error:', e);
-          return res.redirect(`${FRONTEND_URL}/?auth_error=link_failed`);
-        }
-      } else {
-        // LOGIN MODE: find existing account or create new one
-        const existing = await dbFindUserBySocial('google', info.id);
-        if (existing) {
-          user = existing;
-          // Refresh social record with latest info
-          await dbLinkSocialAccount(user.id, {
-            provider: 'google', provider_id: info.id,
-            display_name: info.name, avatar_url: info.picture, email: info.email
-          });
-        } else {
-          user = await dbUpsertUser({
-            provider: 'google', provider_id: info.id,
-            display_name: info.name, avatar_url: info.picture, email: info.email
-          });
-          await dbLinkSocialAccount(user.id, {
-            provider: 'google', provider_id: info.id,
-            display_name: info.name, avatar_url: info.picture, email: info.email
-          });
-        }
-      }
-    } else {
-      user = { id: crypto.createHash('sha256').update('google:' + info.id).digest('hex').substring(0, 24), display_name: info.name, avatar_url: info.picture };
-    }
+    const user = supabase
+      ? await dbUpsertUser({ provider: 'google', provider_id: info.id, display_name: info.name, avatar_url: info.picture, email: info.email })
+      : { id: crypto.createHash('sha256').update('google:' + info.id).digest('hex').substring(0, 24), display_name: info.name, avatar_url: info.picture };
 
     const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
     res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}`);
@@ -442,11 +360,7 @@ app.get('/auth/google/callback', async (req, res) => {
 app.get('/auth/discord', (req, res) => {
   if (!process.env.DISCORD_CLIENT_ID) return res.redirect(`${FRONTEND_URL}/?auth_error=discord_not_configured`);
   const state = crypto.randomBytes(16).toString('hex');
-  // Store linkToken so callback knows whether this is a new login or linking to existing account
-  _oauthStates[state] = {
-    expires: Date.now() + 10 * 60 * 1000,
-    linkToken: req.query.link_token || null
-  };
+  _oauthStates[state] = { expires: Date.now() + 10 * 60 * 1000 };
   const params = new URLSearchParams({
     client_id: process.env.DISCORD_CLIENT_ID,
     redirect_uri: process.env.DISCORD_CALLBACK_URL || `${FRONTEND_URL}/auth/discord/callback`,
@@ -461,10 +375,7 @@ app.get('/auth/discord/callback', async (req, res) => {
   const { code, state, error } = req.query;
   if (error || !code) return res.redirect(`${FRONTEND_URL}/?auth_error=${error || 'cancelled'}`);
   if (!_oauthStates[state]) return res.redirect(`${FRONTEND_URL}/?auth_error=invalid_state`);
-  // IMPORTANT: save state data BEFORE deleting it
-  const stateData = _oauthStates[state];
   delete _oauthStates[state];
-  const linkToken = stateData.linkToken || null;
   try {
     const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -485,54 +396,10 @@ app.get('/auth/discord/callback', async (req, res) => {
     const avatar = info.avatar
       ? `https://cdn.discordapp.com/avatars/${info.id}/${info.avatar}.png`
       : `https://cdn.discordapp.com/embed/avatars/${parseInt(info.discriminator || 0) % 5}.png`;
-    const discordName = info.global_name || info.username;
 
-    let user;
-    if (supabase) {
-      if (linkToken) {
-        // LINK MODE: attach Discord to an already-logged-in account
-        try {
-          const claims = jwt.verify(linkToken, JWT_SECRET);
-          user = await dbGetUserById(claims.sub);
-          if (!user) throw new Error('User not found');
-          await dbLinkSocialAccount(user.id, {
-            provider: 'discord', provider_id: info.id,
-            display_name: discordName, avatar_url: avatar, email: info.email
-          });
-          // Update primary avatar if not already set
-          if (!user.avatar_url) {
-            await supabase.from('cl_users').update({ avatar_url: avatar }).eq('id', user.id);
-          }
-          const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
-          return res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}&linked=discord`);
-        } catch (e) {
-          console.error('Discord link error:', e);
-          return res.redirect(`${FRONTEND_URL}/?auth_error=link_failed`);
-        }
-      } else {
-        // LOGIN MODE: find existing account or create new one
-        const existing = await dbFindUserBySocial('discord', info.id);
-        if (existing) {
-          user = existing;
-          // Refresh social record with latest info
-          await dbLinkSocialAccount(user.id, {
-            provider: 'discord', provider_id: info.id,
-            display_name: discordName, avatar_url: avatar, email: info.email
-          });
-        } else {
-          user = await dbUpsertUser({
-            provider: 'discord', provider_id: info.id,
-            display_name: discordName, avatar_url: avatar, email: info.email
-          });
-          await dbLinkSocialAccount(user.id, {
-            provider: 'discord', provider_id: info.id,
-            display_name: discordName, avatar_url: avatar, email: info.email
-          });
-        }
-      }
-    } else {
-      user = { id: crypto.createHash('sha256').update('discord:' + info.id).digest('hex').substring(0, 24), display_name: discordName, avatar_url: avatar };
-    }
+    const user = supabase
+      ? await dbUpsertUser({ provider: 'discord', provider_id: info.id, display_name: info.global_name || info.username, avatar_url: avatar, email: info.email })
+      : { id: crypto.createHash('sha256').update('discord:' + info.id).digest('hex').substring(0, 24), display_name: info.global_name || info.username, avatar_url: avatar };
 
     const jwtToken = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' });
     res.redirect(`${FRONTEND_URL}/?auth_token=${jwtToken}`);
@@ -772,19 +639,29 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
     }).then(r => r.json());
 
     const [nativeRes, erc20Res] = await Promise.all([nativeTask, erc20Task]);
+
+    // Detect Alchemy auth/rate-limit failure — fall through to Moralis
+    const alchemyFailed = nativeRes.error || erc20Res.error ||
+      (typeof nativeRes.message === 'string' && nativeRes.message.includes('authenticated')) ||
+      (typeof erc20Res.message === 'string' && erc20Res.message.includes('authenticated'));
+    if (alchemyFailed) {
+      console.warn(`⚠️ Alchemy failed for ${chainId} — trying Moralis fallback`);
+      return await fetchMoralisTokens(address, chainId);
+    }
+
     const tokens = [];
 
-    // Native token config — all ETH-equivalent L2s share the same symbol/logo
+    // Native token config  CoinGecko CDN logos (reliable, no rate limits)
     const _nc = {
-      polygon:    { symbol:'POL',  name:'Polygon',   logo:'https://cryptologos.cc/logos/polygon-matic-logo.png' },
-      avalanche:  { symbol:'AVAX', name:'Avalanche',  logo:'https://cryptologos.cc/logos/avalanche-avax-logo.png' },
-      ronin:      { symbol:'RON',  name:'Ronin',      logo:'https://cryptologos.cc/logos/ronin-ron-logo.png' },
-      apechain:   { symbol:'APE',  name:'ApeCoin',    logo:'https://cryptologos.cc/logos/apecoin-ape-ape-logo.png' },
-      gnosis:     { symbol:'xDAI', name:'Gnosis',     logo:'https://cryptologos.cc/logos/gnosis-gno-logo.png' },
-      hyperevm:   { symbol:'HYPE', name:'HyperEVM',   logo:'https://via.placeholder.com/100/6366f1/ffffff?text=HYPE' },
+      polygon:    { symbol:'POL',  name:'Polygon',   logo:'https://assets.coingecko.com/coins/images/4713/small/polygon.png' },
+      avalanche:  { symbol:'AVAX', name:'Avalanche',  logo:'https://assets.coingecko.com/coins/images/12559/small/Avalanche_Circle_RedWhite_Trans.png' },
+      ronin:      { symbol:'RON',  name:'Ronin',      logo:'https://assets.coingecko.com/coins/images/14603/small/Ronin.png' },
+      apechain:   { symbol:'APE',  name:'ApeCoin',    logo:'https://assets.coingecko.com/coins/images/24383/small/apecoin.jpg' },
+      gnosis:     { symbol:'xDAI', name:'Gnosis',     logo:'https://assets.coingecko.com/coins/images/11062/small/Identity-Primary-DarkBG.png' },
+      hyperevm:   { symbol:'HYPE', name:'HyperEVM',   logo:'https://assets.coingecko.com/coins/images/53545/small/hyperliquid.jpg' },
     };
     const { symbol: nativeSymbol, name: nativeName, logo: nativeLogo } =
-      _nc[chainId] || { symbol:'ETH', name:'Ether', logo:'https://cryptologos.cc/logos/ethereum-eth-logo.png' };
+      _nc[chainId] || { symbol:'ETH', name:'Ether', logo:'https://assets.coingecko.com/coins/images/279/small/ethereum.png' };
 
     // Use CoinGecko by symbol — avoids chain-specific WETH address failures on L2s
     const nativeUsdPrice = await fetchNativePrice(nativeSymbol);
@@ -850,6 +727,65 @@ const fetchAlchemyTokens = async (network, address, chainId) => {
   } catch (e) { 
     console.error(`❌ Error fetching tokens for ${chainId}:`, e.message);
     return []; 
+  }
+};
+
+// ── Moralis EVM token fallback (used when Alchemy key is rate-limited or invalid) ──
+const MORALIS_CHAIN = {
+  ethereum:'0x1', polygon:'0x89', avalanche:'0xa86a', arbitrum:'0xa4b1',
+  optimism:'0xa', base:'0x2105', gnosis:'0x64', blast:'0x13e31',
+};
+const fetchMoralisTokens = async (address, chainId) => {
+  const chainHex = MORALIS_CHAIN[chainId];
+  if (!chainHex || !API_KEYS.moralis) {
+    console.warn(`⚠️ No Moralis support for ${chainId} — returning empty`);
+    return [];
+  }
+  console.log(`🔄 Moralis fallback for ${chainId} (${chainHex})`);
+  try {
+    const headers = { accept:'application/json', 'X-API-Key': API_KEYS.moralis };
+    const [nativeRes, erc20Res] = await Promise.all([
+      fetch(`https://deep-index.moralis.io/api/v2.2/${address}/balance?chain=${chainHex}`, { headers }),
+      fetch(`https://deep-index.moralis.io/api/v2.2/${address}/erc20?chain=${chainHex}`, { headers })
+    ]);
+    if (!nativeRes.ok || !erc20Res.ok) {
+      console.error(`❌ Moralis fallback failed for ${chainId}: native=${nativeRes.status} erc20=${erc20Res.status}`);
+      return [];
+    }
+    const [nativeData, erc20Data] = await Promise.all([nativeRes.json(), erc20Res.json()]);
+
+    const _nc = {
+      polygon:   { symbol:'POL',  name:'Polygon',   logo:'https://assets.coingecko.com/coins/images/4713/small/polygon.png' },
+      avalanche: { symbol:'AVAX', name:'Avalanche',  logo:'https://assets.coingecko.com/coins/images/12559/small/Avalanche_Circle_RedWhite_Trans.png' },
+      gnosis:    { symbol:'xDAI', name:'Gnosis',     logo:'https://assets.coingecko.com/coins/images/11062/small/Identity-Primary-DarkBG.png' },
+    };
+    const { symbol: nativeSym, name: nativeName, logo: nativeLogo } =
+      _nc[chainId] || { symbol:'ETH', name:'Ether', logo:'https://assets.coingecko.com/coins/images/279/small/ethereum.png' };
+    const nativeUsd = await fetchNativePrice(nativeSym);
+    const tokens = [];
+
+    const rawBal = parseInt(nativeData.balance || '0');
+    if (rawBal > 0) {
+      const bal = rawBal / 1e18;
+      tokens.push({ id:'native', name:nativeName, symbol:nativeSym, balance:bal.toFixed(4),
+        usdPrice:nativeUsd, nativePrice:bal.toFixed(4), totalValue:(bal*nativeUsd).toFixed(2),
+        image:nativeLogo, chain:chainId, isToken:true });
+    }
+    for (const t of (erc20Data.result || []).slice(0, 15)) {
+      const dec = parseInt(t.decimals || '18');
+      const bal = parseInt(t.balance || '0') / Math.pow(10, dec);
+      if (bal < 0.000001) continue;
+      const usd = await fetchUSDPrice(chainId, t.token_address);
+      const nativePrice = nativeUsd > 0 ? usd / nativeUsd : 0;
+      tokens.push({ id:t.token_address, name:t.name||'Unknown', symbol:t.symbol||'???',
+        balance:bal.toFixed(4), usdPrice:usd, nativePrice:nativePrice.toFixed(4),
+        totalValue:(bal*usd).toFixed(2), image:t.logo||'', chain:chainId, isToken:true });
+    }
+    console.log(`✅ Moralis fallback ${chainId}: ${tokens.length} tokens`);
+    return tokens;
+  } catch (e) {
+    console.error(`❌ Moralis fallback error for ${chainId}:`, e.message);
+    return [];
   }
 };
 
@@ -985,7 +921,7 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
           usdPrice,
           nativePrice: nativePrice.toFixed(4), // Price per token in MON
           totalValue: (balance * usdPrice).toFixed(2),
-          image: t.logo || t.thumbnail || `https://via.placeholder.com/400/836EF9/ffffff?text=${t.symbol || 'MON'}`,
+          image: t.logo || t.thumbnail || '',
           chain: 'monad',
           isToken: true,
           address: t.token_address
@@ -1088,7 +1024,7 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
               usdPrice,
               nativePrice: nativePrice.toFixed(4), // Price per token in MON
               totalValue: (balance * usdPrice).toFixed(2),
-              image: `https://via.placeholder.com/50/836EF9/ffffff?text=${encodeURIComponent(symbol)}`,
+              image: '',
               chain: 'monad',
               isToken: true,
               address: contractAddr
@@ -1149,7 +1085,7 @@ app.get('/api/:mode(nfts|tokens)/monad/:address', async (req, res) => {
                   balance: balance.toFixed(4), usdPrice,
                   totalValue: (balance * usdPrice).toFixed(2),
                   nativePrice: nativePrice.toFixed(4), // Price per token in MON
-                  image: `https://via.placeholder.com/50/836EF9/ffffff?text=${encodeURIComponent(symbol)}`,
+                  image: '',
                   chain: 'monad', isToken: true, address: contractAddr
                 };
               } catch { return null; }
@@ -1352,7 +1288,7 @@ app.get('/api/:mode(nfts|tokens)/solana/:address', async (req, res) => {
                 // Try to get metadata
                 let symbol = 'UNKNOWN';
                 let name = 'Unknown Token';
-                let image = 'https://via.placeholder.com/100/14F195/ffffff?text=?';
+                let image = '';
                 
                 // Try to fetch token metadata
                 try {
@@ -1524,7 +1460,7 @@ app.get('/api/:mode(nfts|tokens)/cardano/:address', async (req, res) => {
           usdPrice: adaPrice,
           nativePrice: '1.0000',
           totalValue: (adaBalance * adaPrice).toFixed(2),
-          image: 'https://cryptologos.cc/logos/cardano-ada-logo.png',
+          image: 'https://assets.coingecko.com/coins/images/975/small/cardano.png',
           chain: 'cardano',
           isToken: true,
           metadata: { traits: [], description: '' }

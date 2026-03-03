@@ -501,16 +501,29 @@
 
       const truncAddr = (addr) => addr ? addr.substring(0,8) + '…' + addr.slice(-6) : '';
 
-      // ── Image helpers ──────────────────────────────────────────────────────
-      // Convert ipfs:// and ar:// to HTTPS before browser sees them
-      const resolveImg = function(url) {
+      // ── CoinGecko image map — built from already-loaded market data, zero extra API calls ──
+      // Keys: lowercase symbol ("btc", "eth", "ada") → CoinGecko image URL
+      const coinImageMap = useMemo(() => {
+        var map = {};
+        (marketData || []).forEach(function(coin) {
+          if (coin.symbol && coin.image) map[coin.symbol.toLowerCase()] = coin.image;
+          if (coin.id && coin.image) map[coin.id.toLowerCase()] = coin.image;
+        });
+        return map;
+      }, [marketData]);
+
+      // ── Resolve image: CoinGecko first, then fix raw IPFS/Arweave URLs ──────
+      const resolveImg = function(url, symbol) {
+        // Try CoinGecko map by symbol first
+        if (symbol && coinImageMap[symbol.toLowerCase()]) return coinImageMap[symbol.toLowerCase()];
         if (!url) return '';
         if (url.indexOf('ipfs://') === 0) return 'https://ipfs.io/ipfs/' + url.slice(7);
         if (url.indexOf('ar://') === 0) return 'https://arweave.net/' + url.slice(5);
         if (url.indexOf('cloudflare-ipfs.com') > -1) return url.replace('cloudflare-ipfs.com', 'ipfs.io');
         return url;
       };
-      // SVG fallback — colored circle with token initials, no external CDN
+
+      // ── SVG fallback — colored circle with token initials, no external CDN ──
       const imgFallbackSvg = function(symbol, chain) {
         var colors = {solana:'14F195',cardano:'0033AD',ethereum:'627EEA',polygon:'8247E5',
                       base:'0052FF',avalanche:'E84142',optimism:'FF0420',arbitrum:'28A0F0',
@@ -520,7 +533,8 @@
         var tc = bg === 'FCFC03' ? '000000' : 'ffffff';
         return 'data:image/svg+xml,%3Csvg xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22 width%3D%2280%22 height%3D%2280%22%3E%3Crect width%3D%2280%22 height%3D%2280%22 rx%3D%2240%22 fill%3D%22%23' + bg + '%22%2F%3E%3Ctext x%3D%2250%25%22 y%3D%2250%25%22 dominant-baseline%3D%22middle%22 text-anchor%3D%22middle%22 font-family%3D%22Arial%2Csans-serif%22 font-weight%3D%22bold%22 font-size%3D%2226%22 fill%3D%22%23' + tc + '%22%3E' + text + '%3C%2Ftext%3E%3C%2Fsvg%3E';
       };
-      // TrustWallet chain slugs for EVM token logo fallback
+
+      // ── TrustWallet chain slug map for EVM token logo fallback ────────────
       const twChain = {ethereum:'ethereum',polygon:'polygon',avalanche:'avalanchec',
                        base:'base',arbitrum:'arbitrum',optimism:'optimism'};
 
@@ -1150,7 +1164,7 @@
               </div>
             </div>
 
-            {/* Dark mode toggle — fixed top-right corner */}
+            {/* Dark mode — fixed top-right corner */}
             <div className={`fixed top-4 right-4 z-50 flex items-center space-x-3 px-4 py-2.5 rounded-2xl border backdrop-blur-md transition-all ${darkMode ? 'bg-slate-900/80 border-slate-700' : 'bg-white/80 border-slate-200 shadow-md'}`}>
                 <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
                 <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full cursor-pointer ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
@@ -1369,7 +1383,7 @@
                         </div>
                         <div className={isListView ? "w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 relative" : "aspect-square relative overflow-hidden bg-slate-100"}>
                             <img
-                              src={resolveImg(nft.image || '')}
+                              src={resolveImg(nft.image || '', nft.symbol)}
                               className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                               onError={(e) => {
                                 const el = e.currentTarget;
@@ -1377,6 +1391,9 @@
                                 const addr = nft.id || nft.address || nft.mint || '';
                                 const origSrc = nft.image || '';
                                 const fallbacks = [];
+                                // CoinGecko by symbol (catches common tokens not in map at render time)
+                                const cgImg = coinImageMap[(nft.symbol||'').toLowerCase()];
+                                if (cgImg && el.src !== cgImg) fallbacks.push(cgImg);
                                 // IPFS: try two more gateways
                                 if (origSrc.indexOf('ipfs://') === 0 || origSrc.indexOf('/ipfs/') > -1) {
                                   const cid = origSrc.replace('ipfs://','').replace(/.*\/ipfs\//,'');
@@ -1593,7 +1610,7 @@
                                                 <td className="py-4 text-xs font-bold opacity-30 px-2">{coin.market_cap_rank}</td>
                                                 <td className="py-4">
                                                     <div className="flex items-center gap-3">
-                                                        <img src={resolveImg(coin.image)} className="w-6 h-6 rounded-full flex-shrink-0"
+                                                        <img src={coin.image} className="w-6 h-6 rounded-full flex-shrink-0"
                                                           onError={(e) => { e.currentTarget.onerror=null; e.currentTarget.src=imgFallbackSvg(coin.symbol,'ethereum'); }} />
                                                         <div>
                                                             <p className="text-xs font-bold uppercase">{coin.name}</p>
@@ -2100,7 +2117,7 @@
                         {hiddenList.map(nft => (
                           <div key={`${nft.chain}-${nft.address || nft.id || nft.mint || nft.name}`} className="flex items-center justify-between p-3 rounded-2xl bg-black/20 border border-white/5">
                             <div className="flex items-center gap-4">
-                              <img src={resolveImg(nft.image)} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" onError={(e)=>{e.currentTarget.onerror=null;e.currentTarget.src=imgFallbackSvg(nft.symbol,nft.chain);}} />
+                              <img src={resolveImg(nft.image, nft.symbol)} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" onError={(e)=>{e.currentTarget.onerror=null;e.currentTarget.src=imgFallbackSvg(nft.symbol,nft.chain);}} />
                               <span className="text-xs font-bold uppercase tracking-tighter">{nft.name} (Hidden)</span>
                             </div>
                             <button onClick={(e) => toggleHide(e, nft)} className="text-[10px] font-bold text-blue-400 hover:text-white uppercase">Restore</button>
@@ -2109,7 +2126,7 @@
                         {spamList.map(nft => (
                           <div key={`${nft.chain}-${nft.address || nft.id || nft.mint || nft.name}`} className="flex items-center justify-between p-3 rounded-2xl bg-red-950/20 border border-red-500/10">
                             <div className="flex items-center gap-4">
-                              <img src={resolveImg(nft.image)} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" onError={(e)=>{e.currentTarget.onerror=null;e.currentTarget.src=imgFallbackSvg(nft.symbol,nft.chain);}} />
+                              <img src={resolveImg(nft.image, nft.symbol)} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" onError={(e)=>{e.currentTarget.onerror=null;e.currentTarget.src=imgFallbackSvg(nft.symbol,nft.chain);}} />
                               <span className="text-xs font-bold uppercase tracking-tighter text-red-400">{nft.name} (Spam)</span>
                             </div>
                             <button onClick={(e) => toggleSpam(e, nft)} className="text-[10px] font-bold text-red-400 hover:text-white uppercase">Not Spam</button>
@@ -2132,7 +2149,7 @@
                   <button onClick={() => setSelectedAsset(null)} className="absolute top-10 right-10 w-12 h-12 flex items-center justify-center rounded-full bg-slate-800 hover:bg-red-500 text-white transition-all font-bold">✕</button>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                     <div className="rounded-[2.5rem] overflow-hidden shadow-2xl">
-                              <img src={resolveImg(selectedAsset.image)} className="w-full h-auto rounded-2xl" onError={(e)=>{e.currentTarget.onerror=null;e.currentTarget.src=imgFallbackSvg(selectedAsset.symbol,selectedAsset.chain);}} />
+                              <img src={resolveImg(selectedAsset.image, selectedAsset.symbol)} className="w-full h-auto rounded-2xl" onError={(e)=>{e.currentTarget.onerror=null;e.currentTarget.src=imgFallbackSvg(selectedAsset.symbol,selectedAsset.chain);}} />
                     </div>
                     <div>
                        <div className={`inline-block px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest mb-4 ${chainStyles[selectedAsset.chain]?.color} text-white`}>{selectedAsset.chain}</div>
