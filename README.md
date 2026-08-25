@@ -63,6 +63,10 @@ Chain pills appear as small `uppercase tracking-widest` badge overlays on asset 
 
 ### UI Palette (Tailwind)
 
+`slate`, `blue`, `cyan` and `white` are declared as CSS variables so a MagicMoney
+theme can recolour them (see §9); the values below are the stock defaults, and
+the roles below are what a theme re-maps.
+
 | Role | Dark Mode | Light Mode |
 |---|---|---|
 | Page background | `slate-950` / `slate-900` | `white` / `slate-50` |
@@ -179,9 +183,39 @@ Max content width: `max-w-6xl mx-auto` for the asset grid; wider for market/prof
 
 ## 9. Theming
 
-Dark/light mode is controlled by a `darkMode` boolean in React state (persisted to `localStorage`). All components pass `darkMode` as a prop and use conditional Tailwind classes inline — no CSS variables or `dark:` prefix variant.
+Light and dark are controlled by a `darkMode` boolean in React state (persisted to `localStorage`). All components pass `darkMode` as a prop and use conditional Tailwind classes inline — no `dark:` prefix variant.
 
 **Toggle location:** Top-right of the navbar, custom animated switch.
+
+### MagicMoney themes
+
+Signed-in accounts that can also use Messenger — a verified (non-watch-only)
+wallet **and** a linked Google or Discord account — get the twelve themes
+MagicMoney Wallet ships plus any custom themes the wallet has synced to the
+ChainLens profile. Everyone else keeps the light/dark switch, unchanged.
+
+Because nothing in the app reads a design token, a theme is applied by
+**recolouring the Tailwind palette itself**. `index.html` declares `slate`,
+`blue`, `cyan` and `white` as `rgb(var(--cl-…) / <alpha-value>)`, and
+`public/theme-engine.js` writes new values for those variables on `<html>`. Every
+existing class keeps working, alpha modifiers and gradients included:
+
+| Family | Themed as |
+|---|---|
+| `slate` | A page-background → primary-text ramp; the theme's tone decides which end is which, and `darkMode` follows that tone |
+| `white` | Primary text in a dark theme, the card surface in a light one |
+| `blue`, `cyan` | The theme's accent hue and saturation at each stop's **stock relative luminance**, so `bg-cyan-500 text-slate-950` and `bg-blue-600 text-white` stay readable for any accent |
+| `emerald`, `red`, `amber`, chain pills | Not themed — they mean success, danger, warning and "this is Solana" |
+
+`theme-engine.js` is a hand-kept port of the wallet's `color.ts`,
+`theme-tokens.ts`, `builtin-themes.ts` and `theme-sync-wire.ts` (same
+arrangement as `public/asset-filter-key.js`). The stock palette is duplicated in
+`index.html`'s `:root` block so a failed script load leaves light and dark
+looking exactly as they always have; `test/theme-engine.test.js` asserts the two
+copies match, and holds the ramps to the contrast the markup was written against.
+
+Themes are **read-only here** — they are created and edited in MagicMoney Wallet,
+and which one ChainLens wears is a per-install choice that never travels back.
 
 ---
 
@@ -245,6 +279,7 @@ Dark/light mode is controlled by a `darkMode` boolean in React state (persisted 
 | `cl_friendships` | Pending/accepted friend relationships keyed by ChainLens user IDs |
 | `cl_world_messages` | World Chat text and GIPHY messages |
 | `cl_direct_messages` | Messages scoped to an accepted friendship |
+| `cl_themes` | Custom themes built in MagicMoney Wallet, one row per account |
 
 ### Messenger setup
 
@@ -260,11 +295,23 @@ The frontend polls cursor-based message endpoints and periodically reconciles
 deletions, while the Express server owns authorization and is the only caller
 allowed to access the RLS-protected chat tables.
 
+### Themes setup
+
+Run `sql/cl_themes.sql` once against the Supabase project. Until it exists,
+`GET /api/profile/themes` reads as "no custom themes" rather than failing, so the
+twelve built-ins still work — they are client-side. The table is written only by
+MagicMoney Wallet, through its Cloudflare Worker; ChainLens reads it with the
+service key and never writes. The route is gated on the same eligibility as
+Messenger and answers `200 { eligible: false, entries: {} }` rather than a 403,
+because the client draws the whole picker from that one reply.
+
 ### localStorage (client-side)
 
 | Key | Content |
 |---|---|
 | `cl_token` | JWT auth token |
+| `cl_theme` | Chosen theme id — `light`, `dark`, a MagicMoney theme, or a `custom-…` synced one |
+| `darkMode` | Whether the current theme's tone is dark; also the fallback when a theme cannot be worn |
 | `hiddenAssets` | JSON array of asset IDs hidden by user |
 | `spamAssets` | JSON array of asset IDs marked as spam |
 

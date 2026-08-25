@@ -22,12 +22,42 @@
   <script src="/chain-catalog.js"></script>
   <script src="/wallet-providers.js"></script>
   <script src="/asset-filter-key.js"></script>
+  <script src="/theme-engine.js"></script>
   <script src="app-hub-data.js"></script>
 
   <script>
+    // ── Themed palette ──────────────────────────────────────────────────────
+    //
+    // slate, white, blue and cyan are declared as CSS variables so a MagicMoney
+    // theme can repaint the whole app without touching a single class name (see
+    // /theme-engine.js for what the variables mean and why only these four
+    // families move). Every other Tailwind colour is stock, on purpose: emerald,
+    // red and amber carry meaning, not branding.
+    //
+    // <alpha-value> is what keeps bg-slate-900/60, ring-cyan-500/40 and the
+    // gradient utilities working — it is substituted per class, so the variables
+    // must hold SPACE-SEPARATED triplets ("15 23 42"), never "15, 23, 42".
+    const clPalette = (prefix) => [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
+      .reduce((out, stop) => {
+        out[stop] = `rgb(var(--cl-${prefix}-${stop}) / <alpha-value>)`;
+        return out;
+      }, {});
+
     tailwind.config = {
       theme: {
         extend: {
+          colors: {
+            white: 'rgb(var(--cl-white) / <alpha-value>)',
+            slate: clPalette('slate'),
+            blue: clPalette('blue'),
+            cyan: clPalette('cyan'),
+          },
+          // ⚠ Restating Tailwind's own default, which is derived from
+          // colors.blue.500 and comes out WRONG once that is a var() colour:
+          // the CDN build resolves it to #93c5fd — blue-300, half a scale away —
+          // and every ring-N written without a colour picks it up. Measured
+          // against the CDN; a plain hex is what it resolves correctly.
+          ringColor: { DEFAULT: '#3b82f6' },
           fontFamily: {
             sans: ['Space Grotesk', 'sans-serif'],
             heading: ['Syne', 'sans-serif'],
@@ -41,7 +71,46 @@
   </script>
 
   <style>
-    body { font-family: 'Space Grotesk', sans-serif; scroll-behavior: smooth; }
+    /*
+     * Stock Tailwind v3 slate / blue / cyan / white — the un-themed app.
+     *
+     * ⚠ This block, not theme-engine.js, is what the browser paints when no
+     * theme is worn. It is declared here so a failure to load the engine leaves
+     * Light and Dark looking exactly as they always have, rather than stripping
+     * every colour out of the page. theme-engine.js keeps the same table for the
+     * accent's luminance anchors; test/theme-engine.test.js asserts they match.
+     *
+     * A theme overrides these as inline properties on <html>, which win over
+     * :root, and un-wearing one removes the inline property rather than writing
+     * a second copy of these values.
+     */
+    :root {
+      --cl-white: 255 255 255;
+      --cl-slate-50: 248 250 252;  --cl-slate-100: 241 245 249; --cl-slate-200: 226 232 240;
+      --cl-slate-300: 203 213 225; --cl-slate-400: 148 163 184; --cl-slate-500: 100 116 139;
+      --cl-slate-600: 71 85 105;   --cl-slate-700: 51 65 85;    --cl-slate-800: 30 41 59;
+      --cl-slate-900: 15 23 42;    --cl-slate-950: 2 6 23;
+
+      --cl-blue-50: 239 246 255;  --cl-blue-100: 219 234 254; --cl-blue-200: 191 219 254;
+      --cl-blue-300: 147 197 253; --cl-blue-400: 96 165 250;  --cl-blue-500: 59 130 246;
+      --cl-blue-600: 37 99 235;   --cl-blue-700: 29 78 216;   --cl-blue-800: 30 64 175;
+      --cl-blue-900: 30 58 138;   --cl-blue-950: 23 37 84;
+
+      --cl-cyan-50: 236 254 255;  --cl-cyan-100: 207 250 254; --cl-cyan-200: 165 243 252;
+      --cl-cyan-300: 103 232 249; --cl-cyan-400: 34 211 238;  --cl-cyan-500: 6 182 212;
+      --cl-cyan-600: 8 145 178;   --cl-cyan-700: 14 116 144;  --cl-cyan-800: 21 94 117;
+      --cl-cyan-900: 22 78 99;    --cl-cyan-950: 8 51 68;
+
+      /* Behind the app itself. No utility class paints <body>, so without this
+         an overscroll bounce shows white under a dark theme. */
+      --cl-page: 248 250 252;
+    }
+
+    body {
+      font-family: 'Space Grotesk', sans-serif;
+      scroll-behavior: smooth;
+      background-color: rgb(var(--cl-page));
+    }
     .font-heading { font-family: 'Syne', sans-serif; }
     
     .bg-solana-gradient {
@@ -85,8 +154,8 @@
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
     .dark-scroll::-webkit-scrollbar { width: 8px; }
-    .dark-scroll::-webkit-scrollbar-track { background: #0f172a; }
-    .dark-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    .dark-scroll::-webkit-scrollbar-track { background: rgb(var(--cl-slate-900)); }
+    .dark-scroll::-webkit-scrollbar-thumb { background: rgb(var(--cl-slate-700)); border-radius: 10px; }
     
     /* Profile page styles */
     .wallet-card {
@@ -995,6 +1064,139 @@
       );
     };
 
+    // ── Themes ────────────────────────────────────────────────────────────────
+    //
+    // The two base modes are always available; everything past them is the
+    // MagicMoney theme set, and reaching it needs the same thing chat needs — a
+    // ChainLens account with a verified wallet AND a Google or Discord login.
+    // The colours themselves come from /theme-engine.js.
+
+    const THEME_KEY = 'cl_theme';
+    const BASE_MODES = [
+      { id: 'light', name: 'Light', colors: { bg: '#f8fafc', accent: '#3b82f6', text: '#0f172a' } },
+      { id: 'dark',  name: 'Dark',  colors: { bg: '#020617', accent: '#3b82f6', text: '#f8fafc' } },
+    ];
+    const isBaseMode = (id) => id === 'light' || id === 'dark';
+
+    const readStoredThemeId = () => {
+      try {
+        // No cl_theme means an install from before themes existed: its darkMode
+        // flag is the choice that has to be honoured, not reset to Light.
+        return localStorage.getItem(THEME_KEY)
+          || (localStorage.getItem('darkMode') === 'true' ? 'dark' : 'light');
+      } catch { return 'light'; }
+    };
+
+    const readStoredDark = () => {
+      try { return localStorage.getItem('darkMode') === 'true'; } catch { return false; }
+    };
+
+    /** The two-tone dot the picker identifies a theme by: background, then accent. */
+    const ThemeSwatch = ({ colors }) => {
+      const engine = window.chainlensThemes;
+      const [bg, accent] = engine ? engine.swatchOf(colors) : [colors.bg, colors.accent];
+      return (
+        <span
+          className="w-4 h-4 rounded-full border border-slate-400/40 shrink-0"
+          style={{ background: `linear-gradient(135deg, ${bg} 0 50%, ${accent} 50% 100%)` }}
+        />
+      );
+    };
+
+    /**
+     * The theme control in the top-right corner.
+     *
+     * Two shapes, and which one you get IS the feature: without an eligible
+     * account this stays the Light/Dark switch it has always been, down to the
+     * markup. With one, it opens the twelve themes MagicMoney ships plus
+     * whatever the wallet has synced to the account.
+     */
+    const ThemePicker = ({ activeTheme, darkMode, eligible, builtins, customs, onSelect }) => {
+      const [open, setOpen] = useState(false);
+      const boxRef = useRef(null);
+
+      // Close on an outside click or Escape. Registered only while open, so the
+      // shut picker costs nothing.
+      useEffect(() => {
+        if (!open) return;
+        const onDown = (event) => {
+          if (boxRef.current && !boxRef.current.contains(event.target)) setOpen(false);
+        };
+        const onKey = (event) => { if (event.key === 'Escape') setOpen(false); };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('keydown', onKey);
+        return () => {
+          document.removeEventListener('mousedown', onDown);
+          document.removeEventListener('keydown', onKey);
+        };
+      }, [open]);
+
+      const shell = darkMode
+        ? 'bg-slate-900/80 border-slate-700'
+        : 'bg-white/80 border-slate-200 shadow-md';
+
+      if (!eligible) {
+        return (
+          <div data-testid="theme-toggle"
+               className={`fixed top-4 right-4 z-50 flex items-center space-x-3 px-4 py-2.5 rounded-2xl border backdrop-blur-md transition-all ${shell}`}>
+            <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
+            <div onClick={() => onSelect(darkMode ? 'light' : 'dark')}
+                 role="switch" aria-checked={darkMode} aria-label="Dark mode"
+                 className={`switch-bg rounded-full cursor-pointer ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
+              <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+            </div>
+          </div>
+        );
+      }
+
+      const row = (theme) => {
+        const selected = theme.id === activeTheme.id;
+        return (
+          <button key={theme.id} onClick={() => { onSelect(theme.id); setOpen(false); }}
+                  data-testid={`theme-option-${theme.id}`} aria-current={selected ? 'true' : undefined}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left transition-colors ${selected
+                    ? (darkMode ? 'bg-slate-800' : 'bg-slate-100')
+                    : (darkMode ? 'hover:bg-slate-800/60' : 'hover:bg-slate-50')}`}>
+            <ThemeSwatch colors={theme.colors} />
+            <span className="flex-1 truncate text-[11px] font-bold">{theme.name}</span>
+            {selected && <span className="text-cyan-400 text-xs leading-none">✓</span>}
+          </button>
+        );
+      };
+
+      const heading = (text) => (
+        <p className={`px-3 pt-3 pb-1 text-[9px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>{text}</p>
+      );
+
+      return (
+        <div ref={boxRef} data-testid="theme-picker" className="fixed top-4 right-4 z-50">
+          <button onClick={() => setOpen(v => !v)} aria-expanded={open} aria-haspopup="menu"
+                  data-testid="theme-picker-button"
+                  className={`flex items-center space-x-2.5 px-4 py-2.5 rounded-2xl border backdrop-blur-md transition-all ${shell}`}>
+            <ThemeSwatch colors={activeTheme.colors} />
+            <span className="text-[10px] font-bold uppercase tracking-widest opacity-70 max-w-28 truncate">{activeTheme.name}</span>
+            <span className={`text-[8px] transition-transform ${open ? 'rotate-180' : ''}`}>▼</span>
+          </button>
+
+          {open && (
+            <div role="menu" data-testid="theme-menu"
+                 className={`absolute right-0 mt-2 w-56 max-h-[70vh] overflow-y-auto rounded-2xl border backdrop-blur-md p-1.5 shadow-xl ${darkMode ? 'bg-slate-900/95 border-slate-700 dark-scroll' : 'bg-white/95 border-slate-200'}`}>
+              {heading('Mode')}
+              {BASE_MODES.map(row)}
+              {heading('MagicMoney')}
+              {builtins.map(row)}
+              {heading('Your themes')}
+              {customs.length > 0 ? customs.map(row) : (
+                <p className={`px-3 pb-3 pt-1 text-[10px] leading-relaxed ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Themes you build in MagicMoney Wallet appear here.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    };
+
     const App = () => {
       const [activeTab, setActiveTab] = useState('search');
       const [evmAddr, setEvmAddr] = useState('');
@@ -1004,7 +1206,14 @@
       
       const [nfts, setNfts] = useState([]);
       const [loading, setLoading] = useState(false);
-      const [darkMode, setDarkMode] = useState(false);
+      // darkMode stays the switch every utility class branches on; what changed
+      // is who sets it. A theme's TONE now decides it, so a light theme cannot
+      // end up rendered through the dark branch.
+      const [darkMode, setDarkMode] = useState(readStoredDark);
+      const [themeId, setThemeId] = useState(readStoredThemeId);
+      // Whether this account may use themes at all, and which ones MagicMoney
+      // has synced to it. One request answers both.
+      const [themeAccess, setThemeAccess] = useState({ eligible: false, entries: {} });
       const [selectedAsset, setSelectedAsset] = useState(null);
       const [tokenMode, setTokenMode] = useState(false);
       const [viewMode, setViewMode] = useState('nfts'); // 'nfts', 'tokens', 'transactions'
@@ -1226,15 +1435,79 @@
 
       const appHubInitials = (name) => name.split(/\s+/).map(part => part[0]).join('').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase();
 
+      // ── Themes ──────────────────────────────────────────────────────────────
+      //
+      // Which themes exist for this account, and whether it may wear one at all.
+      // The starting answer is "no", so a request that never lands leaves the
+      // Light/Dark switch rather than a half-drawn picker; a request that fails
+      // AFTER one succeeded leaves the last answer standing, because yanking
+      // someone's theme away over a blip is worse than being briefly stale.
+      // The twelve built-ins are client-side, so nothing else is fetched.
       useEffect(() => {
-        const savedMode = localStorage.getItem('darkMode');
-        if (savedMode === 'true') setDarkMode(true);
-      }, []);
+        if (!authToken) { setThemeAccess({ eligible: false, entries: {} }); return; }
+        let cancelled = false;
+        fetch('/api/profile/themes', { headers: { Authorization: `Bearer ${authToken}` } })
+          .then(res => (res.ok ? res.json() : null))
+          .then(body => {
+            if (cancelled || !body) return;
+            setThemeAccess({ eligible: Boolean(body.eligible), entries: body.entries || {} });
+          })
+          .catch(() => {});
+        return () => { cancelled = true; };
+      // userProfile is in here so linking the missing wallet or social account
+      // opens the picker without a reload — that is the moment someone is most
+      // likely to go looking for it.
+      }, [authToken, userProfile]);
 
+      const customThemes = useMemo(() => {
+        const engine = window.chainlensThemes;
+        if (!engine || !themeAccess.eligible) return [];
+        return engine.liveThemes(themeAccess.entries);
+      }, [themeAccess]);
+
+      const themeById = useCallback((id) => {
+        const engine = window.chainlensThemes;
+        if (!engine || isBaseMode(id)) return null;
+        return engine.builtinById(id) || customThemes.find(theme => theme.id === id) || null;
+      }, [customThemes]);
+
+      // What is actually WORN, which is not always what is stored. A theme needs
+      // an eligible account behind it, so when that is missing — signed out, or
+      // a custom theme this account no longer has — the base mode stands in.
+      // The stored id is deliberately left alone: it comes back on sign-in.
+      const activeTheme = useMemo(() => {
+        if (isBaseMode(themeId)) return BASE_MODES[themeId === 'dark' ? 1 : 0];
+        const theme = themeAccess.eligible ? themeById(themeId) : null;
+        // Only a theme that cannot be resolved has to guess, and darkMode is
+        // what the page is actually painted in.
+        return theme || BASE_MODES[darkMode ? 1 : 0];
+      }, [themeId, themeAccess.eligible, themeById, darkMode]);
 
       useEffect(() => {
-        localStorage.setItem('darkMode', darkMode);
-      }, [darkMode]);
+        const engine = window.chainlensThemes;
+        const theme = themeAccess.eligible ? themeById(themeId) : null;
+        let tone;
+        if (!engine) {
+          // The engine failed to load. Light and Dark still render correctly:
+          // the palette's stock values live in index.html's stylesheet, not here.
+          tone = themeId === 'dark' ? 'dark' : 'light';
+        } else if (theme) {
+          tone = engine.applyTheme(theme.colors);
+        } else {
+          // Falling back to the LAST TONE, not to Light: someone signed out of a
+          // dark theme was looking at a dark app, and flipping them to white is
+          // the jarring answer.
+          tone = isBaseMode(themeId) ? themeId : (readStoredDark() ? 'dark' : 'light');
+          engine.applyMode(tone);
+        }
+        setDarkMode(tone === 'dark');
+        try {
+          localStorage.setItem(THEME_KEY, themeId);
+          // Kept in step with what is on screen, so it can serve as that fallback
+          // — and so a build without themes still opens in the right mode.
+          localStorage.setItem('darkMode', String(tone === 'dark'));
+        } catch {}
+      }, [themeId, themeAccess.eligible, themeById]);
 
       // Merge the profile's list in on sign-in, then seed the profile with
       // anything hidden while signed out. Merged, never assigned: a decision made
@@ -2713,13 +2986,16 @@
               </div>
             )}
 
-            {/* Dark mode — fixed top-right corner */}
-            <div className={`fixed top-4 right-4 z-50 flex items-center space-x-3 px-4 py-2.5 rounded-2xl border backdrop-blur-md transition-all ${darkMode ? 'bg-slate-900/80 border-slate-700' : 'bg-white/80 border-slate-200 shadow-md'}`}>
-                <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">{darkMode ? 'Dark' : 'Light'}</span>
-                <div onClick={() => setDarkMode(!darkMode)} className={`switch-bg rounded-full cursor-pointer ${darkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                    <div className={`switch-dot rounded-full bg-white shadow-lg ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
-                </div>
-            </div>
+            {/* Theme — fixed top-right corner. A Light/Dark switch until the
+                account behind it can use the MagicMoney theme set. */}
+            <ThemePicker
+              activeTheme={activeTheme}
+              darkMode={darkMode}
+              eligible={themeAccess.eligible}
+              builtins={(window.chainlensThemes && window.chainlensThemes.BUILTIN_THEMES) || []}
+              customs={customThemes}
+              onSelect={setThemeId}
+            />
 
             {/* Tabs */}
             <div className="flex justify-center mb-6 md:mb-10 px-2">
@@ -2848,7 +3124,7 @@
                                 rel="noopener noreferrer"
                                 className={`group p-5 rounded-[2rem] border transition-all hover:-translate-y-1 ${darkMode ? 'bg-slate-900/50 border-slate-800 hover:border-slate-600' : 'bg-white border-slate-100 shadow-lg hover:shadow-xl'}`}>
                                 <div className="flex items-center justify-between gap-4 mb-5">
-                                  <img src={appRecord.favicon} alt={appRecord.name} className="app-hub-icon w-12 h-12 rounded-2xl ring-4 ring-offset-slate-900" onError={(e) => { e.target.style.display='none'; }} />
+                                  <img src={appRecord.favicon} alt={appRecord.name} className="app-hub-icon w-12 h-12 rounded-2xl ring-4 ring-blue-500/50 ring-offset-slate-900" onError={(e) => { e.target.style.display='none'; }} />
                                   <span className={`px-3 py-1 rounded-full border text-[9px] font-bold uppercase tracking-widest ${style.pill}`}>Featured</span>
                                 </div>
                                 <h3 className="text-xl font-heading font-extrabold uppercase mb-1 group-hover:text-cyan-500 transition-colors">{appRecord.name}</h3>
@@ -2903,7 +3179,7 @@
                                 <div className="p-5 flex flex-col flex-1">
                                     {/* Top row: icon left, category tag pinned to top-right */}
                                     <div className="flex items-start justify-between gap-2 mb-3">
-                                        <img src={appRecord.favicon} alt={appRecord.name} className="app-hub-icon flex-shrink-0 w-12 h-12 rounded-2xl ring-4 ring-offset-slate-900" onError={(e) => { e.target.style.display='none'; }} />
+                                        <img src={appRecord.favicon} alt={appRecord.name} className="app-hub-icon flex-shrink-0 w-12 h-12 rounded-2xl ring-4 ring-blue-500/50 ring-offset-slate-900" onError={(e) => { e.target.style.display='none'; }} />
                                         <span className={`px-2.5 py-1 rounded-full border text-[9px] font-bold uppercase tracking-widest ${style.pill}`}>{appRecord.category}</span>
                                     </div>
                                     {/* Full title — extra spacing so it breathes */}

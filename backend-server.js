@@ -1754,6 +1754,93 @@ app.put('/api/profile/filters', requireAuth, async (req, res) => {
   }
 });
 
+// ── Custom themes (cl_themes) ────────────────────────────────────────────────
+//
+// The themes the user built in MagicMoney Wallet, which the wallet pushes to
+// this account through its Cloudflare Worker (src/main/theme-sync.ts). ChainLens
+// only READS them: a theme is made and edited in the wallet, and wearing one
+// here is a per-install choice that never travels back.
+//
+// Gated on exactly what chat is gated on — a verified wallet AND a Google or
+// Discord account — because that is the rule the product states for everything
+// beyond Light and Dark. Failing that gate is a 200 with eligible:false, not a
+// 403: the client draws the picker from this one call, so "you may not" and
+// "here they are" are two shapes of the same answer, and only a real fault is
+// an error.
+//
+// ⚠ The parser below is a hand-kept port of sanitizeThemeEntries in the wallet's
+// src/shared/theme-sync-wire.ts, which public/theme-engine.js also carries.
+// Drift is SILENT: a theme this rejects is simply a theme that never shows up.
+
+const THEME_ID_MAX = 64;
+const THEME_NAME_MAX = 24;
+const MAX_THEME_ENTRIES = 64;
+const THEME_HEX_RE = /^#[0-9a-f]{6}$/i;
+
+const cleanThemeHex = (value) => {
+  if (typeof value !== 'string') return null;
+  const hex = value.trim();
+  return THEME_HEX_RE.test(hex) ? hex.toLowerCase() : null;
+};
+
+const sanitizeThemeEntries = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  let seen = 0;
+  for (const [id, raw] of Object.entries(value)) {
+    if (seen >= MAX_THEME_ENTRIES) break;
+    if (!id || id.length > THEME_ID_MAX || !id.startsWith('custom-')) continue;
+    if (!raw || typeof raw !== 'object') continue;
+    // typeof first: Number(null) is 0, which is finite and non-negative, so a
+    // null timestamp would sail through as "the oldest possible entry".
+    const t = raw.t;
+    if (typeof t !== 'number' || !Number.isFinite(t) || t < 0) continue;
+
+    // 'd' is a TOMBSTONE, not an absence — it is what keeps a theme deleted on
+    // one device from being resurrected by another device's next push. Passed
+    // through so the client can tell "deleted" from "never seen".
+    if (raw.d === 1) {
+      out[id] = { n: '', c: { bg: '', accent: '', text: '' }, t, d: 1 };
+      seen++;
+      continue;
+    }
+
+    const bg = cleanThemeHex(raw.c?.bg);
+    const accent = cleanThemeHex(raw.c?.accent);
+    const text = cleanThemeHex(raw.c?.text);
+    if (!bg || !accent || !text) continue;
+    out[id] = {
+      n: (typeof raw.n === 'string' ? raw.n : '').trim().slice(0, THEME_NAME_MAX) || 'Custom',
+      c: { bg, accent, text },
+      t,
+    };
+    seen++;
+  }
+  return out;
+};
+
+app.get('/api/profile/themes', requireAuth, async (req, res) => {
+  const denied = { eligible: false, walletLinked: false, socialLinked: false, entries: {} };
+  if (!supabase) return res.json(denied);
+  try {
+    const access = await dbGetChatEligibility(req.user.sub);
+    if (!access.eligible) return res.json({ ...access, entries: {} });
+
+    // A missing table (operator has not run sql/cl_themes.sql) reads as "no
+    // custom themes" rather than a 500 — the twelve built-ins are client-side
+    // and must keep working on their own.
+    const { data } = await supabase
+      .from('cl_themes').select('entries').eq('user_id', req.user.sub).maybeSingle();
+    res.json({ ...access, entries: sanitizeThemeEntries(data?.entries) });
+  } catch (error) {
+    // Only the eligibility lookup throws — the themes read above reports a
+    // failure as no row. So this is "cannot tell whether you qualify", and it
+    // answers no, the same way requireChatAccess refuses a chat it cannot check.
+    console.error('ChainLens theme eligibility check failed:', error);
+    res.json(denied);
+  }
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // CHAINLENS MESSENGER
 //
