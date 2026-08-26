@@ -1947,7 +1947,14 @@
           if (!address) throw new Error('The wallet did not return an EVM account');
           if (!nonce) return { address };
           const message = `ChainLens login\nAddress: ${address}\nNonce: ${nonce}`;
-          const signedSig = await provider.request({ method: 'personal_sign', params: [message, address] });
+          // personal_sign takes params[0] as HEX. Plain text happens to work in
+          // MetaMask, which sniffs the value, but a wallet that reads it as bytes
+          // signs a different digest and the backend can only report the result
+          // as "EVM signature mismatch". Hex is unambiguous everywhere, and it is
+          // what wallet approval dialogs expect to decode for display.
+          const hexMessage = '0x' + Array.from(new TextEncoder().encode(message))
+            .map(b => b.toString(16).padStart(2, '0')).join('');
+          const signedSig = await provider.request({ method: 'personal_sign', params: [hexMessage, address] });
           return { address, signedSig };
         });
       };

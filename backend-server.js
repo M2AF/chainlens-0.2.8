@@ -915,7 +915,12 @@ app.post('/api/auth/wallet-login', async (req, res) => {
   const message = loginMessage(address, nonce);
 
   // ── Verify signature ──────────────────────────────────────────────────────
-  if (chain === 'evm' && ethersVerify) {
+  // Fail CLOSED. These used to read `&& ethersVerify` / `&& nacl`, so a host
+  // where the module failed to load skipped verification entirely and still
+  // issued a 30-day JWT for any address the caller named. /wallet-session
+  // already 503s for the same reason.
+  if (chain === 'evm') {
+    if (!ethersVerify) return res.status(503).json({ error: 'Signature verification unavailable' });
     try {
       const recovered = ethersVerify(message, signature);
       if (recovered.toLowerCase() !== address.toLowerCase())
@@ -923,7 +928,8 @@ app.post('/api/auth/wallet-login', async (req, res) => {
     } catch (e) { return res.status(400).json({ error: 'Invalid EVM signature' }); }
   }
 
-  if (chain === 'solana' && nacl) {
+  if (chain === 'solana') {
+    if (!nacl) return res.status(503).json({ error: 'Signature verification unavailable' });
     try {
       const msgBytes = Buffer.from(message);
       const sigBytes = Buffer.from(signature, 'base64');
